@@ -15,6 +15,7 @@
 #include "hash.h"
 #include "common.h"
 #include "macro.h"
+#include "log.h"
 
 using namespace util;
 
@@ -22,11 +23,8 @@ namespace FeatureBTree {
 
 template<typename K, typename V>
 class alignas(Config::kAlignSize) LeafNode {
- public:
   static constexpr int kNodeSize = Constant<K>::kNodeSize;
   static constexpr int kMergeSize = Constant<K>::kMergeSize;
-
- private:
   static constexpr std::memory_order load_order = std::memory_order_acquire;
   static constexpr std::memory_order store_order = std::memory_order_release;
   typedef FeatureBTree::KVPair<K, V> KVPair;
@@ -67,10 +65,10 @@ class alignas(Config::kAlignSize) LeafNode {
   }
 
   void merge(void*& merged, K& mid) {
-    /* if merge with the right sibling node, return true */
-    // only merge with the right sibling node
-    if(control_.has_sibling()) {
+    CONDITION_ERROR(merged != nullptr, "merged node is uninitialized");
+    if(control_.has_sibling()) {  // only merge with the right sibling node
       LeafNode* rnode = sibling_;
+      CONDITION_ERROR(rnode == nullptr, "sibling is equal to null");
       int lnkey = popcount(bitmap_);
       int rnkey = popcount(rnode->bitmap_);
       // if rnkey == 0 (the rightmost leaf), not merge immediately
@@ -133,7 +131,14 @@ class alignas(Config::kAlignSize) LeafNode {
     }
   }
 
-  int knum() { return popcount(bitmap_); }
+  void statistic(std::map<std::string, double>& stat) {
+    if(control_.has_sibling()) {
+      sibling_->statistic(stat);
+    }
+    stat["index size"] += sizeof(LeafNode);
+    stat["leaf num"] += 1;
+    stat["kv pair num"] += popcount(bitmap_);
+  }
 
   func_used void exhibit() {
     std::vector<K> keys;
@@ -158,11 +163,13 @@ class alignas(Config::kAlignSize) LeafNode {
     // key must be normal encoding form
     if(control_.deleted()) { // current node has been deleted
       next = sibling_;
+      CONDITION_ERROR(next == nullptr, "to_sibling error: next == nullptr");
       return true;
     }
 
     if(control_.has_sibling() && high_key_ < key) {
       next = sibling_;
+      CONDITION_ERROR(next == nullptr, "to_sibling error: next == nullptr");
       return true;
     }
     return false;
@@ -215,11 +222,9 @@ class alignas(Config::kAlignSize) LeafNode {
     /* if the key has already existed, update it and return the old kv pointer,
      * otherwise successfully insert the ky, and return a nullptr, mid must be
      * converted to suitable encoding form before return */
+    rnode = nullptr; // update or normal insert
     char tag = hash(kv->key); // finger print generation
     uint64_t mask = bitmap_ & compare_equal(tags_, tag); // candidates
-
-    LeafNode* node = this;
-    rnode = nullptr;
 
     int idx;
     while(mask) {  // check whether the key exists or not
@@ -237,6 +242,7 @@ class alignas(Config::kAlignSize) LeafNode {
     // into current node even split the node, update node's version, don't need to update
     // the right node's version, because other threads can't access the right node now
 
+    LeafNode* node = this;
     idx = index_least0(bitmap_); // find an empty slot
     //if idx != full_idx, the node has an empty slot
     if(idx == full_idx()) { // full, need split
@@ -286,9 +292,9 @@ class alignas(Config::kAlignSize) LeafNode {
         ((LeafNode*) rnode)->sibling_ = sibling_;
         ((LeafNode*) rnode)->high_key_ = high_key_;
 
-        assert(popcount(mask) == kNodeSize / 2);
+        CONDITION_ERROR(popcount(mask) != kNodeSize / 2, "split error");
         bitmap_ &= ~mask;  // remove keys in leaf node
-        assert(popcount(bitmap_) == kNodeSize / 2);
+        CONDITION_ERROR(popcount(bitmap_) != kNodeSize / 2, "split error");
         sibling_ = (LeafNode*) rnode;
         high_key_ = keys[kNodeSize / 2 - 1].first;
 
@@ -304,7 +310,7 @@ class alignas(Config::kAlignSize) LeafNode {
       mid = encode_convert(high_key_);
     }
 
-    assert((node->bitmap_ & (0x01ul << idx)) == 0);
+    CONDITION_ERROR((node->bitmap_ & (0x01ul << idx)) != 0, "insert error");
     //insert the key into node
     node->kvs_[idx].store(kv, store_order);
     node->tags_[idx] = tag;
@@ -317,9 +323,9 @@ class alignas(Config::kAlignSize) LeafNode {
   KVPair* remove(K key, void*& mnode, K& mid) { // mnode: merged node
     /* key must be normal encoding form, return the old kv (or nullptr),
      * mid must be converted to suitable encoding form before return */
+    mnode = nullptr; // normal remove without merge operation
     char tag = hash(key); // finger print generation
     uint64_t mask = bitmap_ & compare_equal(tags_, tag); // candidates
-    mnode = nullptr;
 
     int idx;
     while(mask) { // check whether the key exists or not

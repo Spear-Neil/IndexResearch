@@ -116,7 +116,7 @@ class Control {
   }
 
   void unlatch_exclusive() {
-    assert(control_.load(load_order) & kLockBit);
+    CONDITION_ERROR((control_.load(load_order) & kLockBit) == 0, "unlatch error");
     control_.fetch_sub(kLockBit);
   }
 

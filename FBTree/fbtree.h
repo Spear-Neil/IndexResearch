@@ -65,23 +65,12 @@ class alignas(64) FBTree {
   void statistics() {
     std::map<std::string, double> stat;
     stat["index depth"] = tree_depth_;
-    std::deque<void*> nodes{root_};
-    while(!nodes.empty()) {
-      void* node = nodes.back();
-      nodes.pop_back();
-      if(is_leaf(node)) {
-        stat["index size"] += sizeof(LeafNode);
-        stat["leaf num"] += 1;
-        stat["kv pair num"] += leaf(node)->knum();
-      } else {
-        stat["index size"] += sizeof(InnerNode);
-        stat["inner num"] += 1;
-        for(void* child : inner(node)->children())
-          nodes.push_back(child);
-      }
+    for(int rid = 0; rid < tree_depth_; rid++) {
+      void* node = root_track_[rid];
+      if(is_leaf(node)) leaf(node)->statistic(stat);
+      else inner(node)->statistic(stat);
     }
-
-    stat["load factor"] = stat["kv pair num"] / (stat["leaf num"] * LeafNode::kNodeSize);
+    stat["load factor"] = stat["kv pair num"] / (stat["leaf num"] * Constant<K>::kNodeSize);
 
     std::cout << "-- FBTree statistics" << std::endl;
     for(auto item : stat) {

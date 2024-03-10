@@ -11,18 +11,17 @@
 #include "control.h"
 #include "type.h"
 #include "macro.h"
+#include "log.h"
 
 namespace FeatureBTree {
 
 template<typename K>
 class alignas(Config::kAlignSize) InnerNode {
- public:
   static constexpr int kNodeSize = Constant<K>::kNodeSize;
   static constexpr int kMergeSize = Constant<K>::kMergeSize;
   static constexpr int kFeatureSize = Constant<K>::kFeatureSize;
   static constexpr int kBitCnt = 64; // bits number of bitmap
 
- private:
   Control control_;
   int knum_;       // the number of keys
   int plen_;       // the length of prefix
@@ -51,7 +50,7 @@ class alignas(Config::kAlignSize) InnerNode {
   }
 
   uint64_t bitmap() {
-    assert(knum_ >= 0 && knum_ <= kNodeSize);
+    CONDITION_ERROR(knum_ < 0 || knum_ > kNodeSize, "error knum");
     if(kNodeSize == 64) {
       if(knum_ == kNodeSize) {
         return 0xFFFF'FFFF'FFFF'FFFFul;
@@ -65,7 +64,7 @@ class alignas(Config::kAlignSize) InnerNode {
 
   int to_next_phase1(K key, void*& next, bool& to_sibling) {
     // key must have been converted to suitable encoding form
-    assert(plen_ >= 0 && plen_ <= kFeatureSize);
+    CONDITION_ERROR(plen_ < 0 || plen_ > kFeatureSize, "prefix length, error");
     int pid = 0;
     for(; pid < plen_; pid++) {
       if(((char*) &key)[pid] != prefix_[pid]) break;
@@ -79,20 +78,20 @@ class alignas(Config::kAlignSize) InnerNode {
     // key is less than prefix
     if(((char*) &key)[pid] < prefix_[pid]) {
       next = children_[0];
-      assert(next != nullptr);
+      CONDITION_ERROR(next == nullptr, "next can't be null");
       return -1;
     }
 
     // key is greater than prefix
     next = next_;
-    assert(next != nullptr);
+    CONDITION_ERROR(next == nullptr, "next can't be null");
     if(control_.has_sibling()) to_sibling = true;
     return 1;
   }
 
   int index_phase1(K key, int& index, void*& next, bool& to_sibling) {
     // key must have been converted to suitable encoding form
-    assert(plen_ >= 0 && plen_ <= kFeatureSize);
+    CONDITION_ERROR(plen_ < 0 || plen_ > kFeatureSize, "prefix length, error");
     int pid = 0;
     for(; pid < plen_; pid++) {
       if(((char*) &key)[pid] != prefix_[pid]) break;
@@ -120,12 +119,14 @@ class alignas(Config::kAlignSize) InnerNode {
     if(knum_ == 0) { // new node
       *(K*) prefix_ = mid, plen_ = kFeatureSize;
     } else {
+      CONDITION_ERROR(knum_ - index < 0, "key insert error");
       for(int rid = 0; rid < kFeatureSize - plen_; rid++) {
         char* src = features_[rid] + index, * dst = src + 1;
         memmove(dst, src, knum_ - index);
         features_[rid][index] = ((char*) &mid)[rid + plen_];
       }
 
+      CONDITION_ERROR(plen_ < 0 || plen_ > kFeatureSize, "error prefix length");
       if(index == 0 || index == knum_) {
         int pid = 0;
         for(; pid < plen_; pid++) {
@@ -134,6 +135,7 @@ class alignas(Config::kAlignSize) InnerNode {
         if(pid < plen_) { // prefix reduction
           void* src = features_[0], * dst = features_[plen_ - pid];
           memmove(dst, src, (kFeatureSize - plen_) * kNodeSize);
+          CONDITION_ERROR(knum_ + 1 > kNodeSize, "error knum");
           for(int rid = 0; rid < plen_ - pid; rid++) {
             memset(features_[rid], prefix_[pid + rid], knum_ + 1);
             features_[rid][index] = ((char*) &mid)[rid + pid];
@@ -145,7 +147,7 @@ class alignas(Config::kAlignSize) InnerNode {
   }
 
   void key_remove(int index) {
-    assert(knum_ >= 2 && index < knum_ - 1);
+    CONDITION_ERROR(knum_ < 2 || index >= knum_ - 1, "key remove error");
     for(int rid = 0; rid < kFeatureSize - plen_; rid++) {
       char* dst = features_[rid] + index, * src = dst + 1;
       memmove(dst, src, knum_ - index - 1);
@@ -159,6 +161,7 @@ class alignas(Config::kAlignSize) InnerNode {
       }
       if(pid > 0) {
         void* src = features_[pid], * dst = features_[0];
+        CONDITION_ERROR(kFeatureSize - plen_ - pid < 0, "key remove error");
         memmove(dst, src, (kFeatureSize - plen_ - pid) * kNodeSize);
         plen_ += pid;
       }
@@ -166,7 +169,7 @@ class alignas(Config::kAlignSize) InnerNode {
   }
 
   void memmove64(void* src, void* dst, int n, bool forward) {
-    assert(n >= 0 && n <= kNodeSize);
+    CONDITION_ERROR(n < 0 || n > kNodeSize, "memmove64 error");
     assert(aligned(src, 8) && aligned(dst, 8));
     if(forward) {
       for(int idx = 0; idx < n; idx++)
@@ -284,7 +287,7 @@ class alignas(Config::kAlignSize) InnerNode {
     if(control_.has_sibling()) {
       InnerNode* rnode = (InnerNode*) next_;
       int rnkey = rnode->knum_;
-      assert(knum_ >= 1);
+      CONDITION_ERROR(knum_ < 1, "merge error");
       if(knum_ + rnkey <= kMergeSize) { // try to merge
         rnode->control_.latch_exclusive();
         rnkey = rnode->knum_;
@@ -326,7 +329,7 @@ class alignas(Config::kAlignSize) InnerNode {
   }
 
   void border_extension() { // prefix extension
-    assert(knum_ >= 1);
+    CONDITION_ERROR(knum_ < 1, "border extension error");
     int pid = 0;
     for(; pid < kFeatureSize - plen_; pid++) {
       if(features_[pid][0] != features_[pid][knum_ - 1]) break;
@@ -334,12 +337,14 @@ class alignas(Config::kAlignSize) InnerNode {
     }
     if(pid > 0) {
       void* src = features_[pid], * dst = features_[0];
+      CONDITION_ERROR(kFeatureSize - plen_ - pid < 0, " border extension error");
       memmove(dst, src, (kFeatureSize - plen_ - pid) * kNodeSize);
       plen_ += pid;
     }
   }
 
   void* border_remove(K& mid, bool& up, int index) {
+    CONDITION_ERROR(up != false, "up is uninitialized");
     void* merged = nullptr;
     if(!control_.has_sibling()) {
       // current node is the right-most node
@@ -408,13 +413,11 @@ class alignas(Config::kAlignSize) InnerNode {
     }
   }
 
-  std::vector<void*> children() {
-    std::vector<void*> kids;
-    for(int i = 0; i < knum_; i++)
-      kids.push_back(children_[i]);
-    if(!control_.has_sibling()) kids.push_back(next_);
-
-    return kids;
+  void statistic(std::map<std::string, double>& stat) {
+    if(control_.has_sibling()) {
+      stat["index size"] += sizeof(InnerNode);
+      stat["inner num"] += 1;
+    }
   }
 
   func_used void exhibit() {
@@ -443,7 +446,7 @@ class alignas(Config::kAlignSize) InnerNode {
 
       if(control_.deleted()) { // current node has been deleted, jump to its left node
         to_sibling = true, next = next_;
-        assert(next != nullptr);
+        CONDITION_ERROR(next == nullptr, "next can't be null");
         break;
       }
 
@@ -470,7 +473,7 @@ class alignas(Config::kAlignSize) InnerNode {
             } else idx = index_least1(eqmask);
           } else idx = kBitCnt - countl_zero(mask);
         } else {
-          assert(popcount(eqmask) == 1);
+          CONDITION_ERROR((popcount(eqmask) != 1), "more than two candidates");
           idx = index_least1(eqmask);
         }
 
@@ -479,7 +482,8 @@ class alignas(Config::kAlignSize) InnerNode {
           if(control_.has_sibling()) to_sibling = true;
         } else { next = children_[idx]; }
       }
-      assert(next != nullptr);
+
+      CONDITION_ERROR(next == nullptr, "next can't be null");
       if(control_.end_read(init_version)) break;
     }
 
@@ -491,8 +495,8 @@ class alignas(Config::kAlignSize) InnerNode {
     bool to_sibling = false;
 
     if(control_.deleted()) { // current node has been deleted, jump to its left node
-      assert(next_ != nullptr);
       next = next_;
+      CONDITION_ERROR(next == nullptr, "next can't be null");
       return true;
     }
 
@@ -522,11 +526,11 @@ class alignas(Config::kAlignSize) InnerNode {
           // greater than all keys, meanwhile current node is not the rightmost node
           if(index == knum_ && control_.has_sibling()) {
             next = next_, to_sibling = true;
-            assert(next != nullptr);
+            CONDITION_ERROR(next == nullptr, "next can't be null");
           }
         }
       } else {
-        assert(popcount(eqmask) == 1);
+        CONDITION_ERROR((popcount(eqmask) != 1), "more than two candidates");
         index = index_least1(eqmask);
       }
     }
@@ -537,13 +541,14 @@ class alignas(Config::kAlignSize) InnerNode {
   void* insert(void* lchild, void* rchild, K& mid, int index) {
     // mid must have been converted to suitable encoding form
     control_.update_version();
-    assert(lchild != nullptr && rchild != nullptr && index <= knum_);
+    CONDITION_ERROR(lchild == nullptr || rchild == nullptr || index < 0 || index > knum_, "insert error");
 
     if(knum_ < kNodeSize) {  // safe, insert mid into current node
       key_insert(mid, index);
       if(index != knum_) { // new node or rightmost node
         void* src = children_ + index + 1;
         void* dst = children_ + index + 2;
+        CONDITION_ERROR(knum_ - index - 1 < 0, "insert error");
         memmove64(src, dst, knum_ - index - 1, false);
         children_[index + 1] = rchild;
       } else { children_[index] = lchild, next_ = rchild; }
@@ -558,29 +563,33 @@ class alignas(Config::kAlignSize) InnerNode {
   void* remove(K& mid, bool& up, int index) {
     // mid must have been converted to suitable encoding form
     control_.update_version(), up = false;
+    CONDITION_ERROR(index < 0 || index >= knum_, "remove error");
     if(index < knum_ - 1) {
       // knum is 2 at least, the merged node is in current node
       key_remove(index);
       void* src = children_ + index + 2;
       void* dst = children_ + index + 1;
+      CONDITION_ERROR(knum_ - index - 2 < 0, "remove error");
       memmove64(src, dst, knum_ - index - 2, true);
 
       knum_ -= 1; // knum >= 1
-      assert(knum_ >= 1);
+      CONDITION_ERROR(knum_ < 1, "remove error");
       return merge(mid);
     }
 
     // index == nkey - 1
-    assert(index == knum_ - 1);
+    CONDITION_ERROR(index != knum_ - 1, "remove error");
     return border_remove(mid, up, index);
   }
 
   bool border_update(K mid, int index) {
-    control_.update_version();
-    memory_expand();
-    for(int rid = 0; rid < kFeatureSize; rid++)
-      features_[rid][index] = ((char*) &mid)[rid];
-    memory_shrink();
+    if(index < knum_) {
+      control_.update_version();
+      memory_expand();
+      for(int rid = 0; rid < kFeatureSize; rid++)
+        features_[rid][index] = ((char*) &mid)[rid];
+      memory_shrink();
+    }
 
     return (knum_ - 1) == index;
   }
