@@ -1,0 +1,346 @@
+#ifndef INDEXRESEARCH_LNODE_H
+#define INDEXRESEARCH_LNODE_H
+
+#include <iostream>
+#include <atomic>
+#include <cassert>
+#include <thread>
+#include <vector>
+#include "config.h"
+#include "control.h"
+#include "constant.h"
+#include "compare.h"
+#include "type.h"
+#include "epoch.h"
+#include "hash.h"
+#include "common.h"
+#include "macro.h"
+
+using namespace util;
+
+namespace FeatureBTree {
+
+template<typename K, typename V>
+class alignas(Config::kAlignSize) LeafNode {
+ public:
+  static constexpr int kNodeSize = Constant<K>::kNodeSize;
+  static constexpr int kMergeSize = Constant<K>::kMergeSize;
+
+ private:
+  static constexpr std::memory_order load_order = std::memory_order_acquire;
+  static constexpr std::memory_order store_order = std::memory_order_release;
+  typedef FeatureBTree::KVPair<K, V> KVPair;
+
+  Control control_;
+  uint64_t bitmap_;
+  K high_key_;
+  LeafNode* sibling_;
+  char tags_[kNodeSize];
+  std::atomic<KVPair*> kvs_[kNodeSize];
+
+ private:
+  uint64_t compare_equal(void* p, char c) {
+    if(kNodeSize == 64)
+      return compare_equal_64(p, c);
+    else if(kNodeSize == 32)
+      return compare_equal_32(p, c);
+    else if(kNodeSize == 16)
+      return compare_equal_16(p, c);
+  }
+
+  constexpr uint64_t half_fill() {
+    if(kNodeSize == 64)
+      return 0xFFFF'FFFFul;
+    else if(kNodeSize == 32)
+      return 0xFFFFul;
+    else if(kNodeSize == 16)
+      return 0xFFul;
+  }
+
+  constexpr int full_idx() {
+    if(kNodeSize == 64)
+      return -1;
+    else if(kNodeSize == 32)
+      return 32;
+    else if(kNodeSize == 16)
+      return 16;
+  }
+
+  void merge(void*& merged, K& mid) {
+    /* if merge with the right sibling node, return true */
+    // only merge with the right sibling node
+    if(control_.has_sibling()) {
+      LeafNode* rnode = sibling_;
+      int lnkey = popcount(bitmap_);
+      int rnkey = popcount(rnode->bitmap_);
+      // if rnkey == 0 (the rightmost leaf), not merge immediately
+      if(lnkey + rnkey <= kMergeSize || lnkey == 0) { // try to merge
+        rnode->control_.latch_exclusive();
+        rnkey = popcount(rnode->bitmap_);
+        // ensure need to merge with right node
+        if(lnkey + rnkey <= kMergeSize || lnkey == 0) {
+          merged = rnode;
+          mid = encode_convert(high_key_);
+
+          // move kv in sibling to current node
+          uint64_t mask = rnode->bitmap_;
+          int ridx, lidx;
+          while(mask) {
+            ridx = index_least1(mask); // valid kv in sibling
+            lidx = index_least0(bitmap_); // empty slot in current node
+            tags_[lidx] = rnode->tags_[ridx];
+            // using exchange, because other update operations may happen concurrently
+            KVPair* kv = rnode->kvs_[ridx].exchange(nullptr);  // get the latest value, and set it to null
+            kvs_[lidx].store(kv, store_order);
+            bitmap_ |= (0x01ul << lidx);
+            mask &= ~(0x01ul << ridx);
+          }
+          rnode->bitmap_ = 0;
+
+          // set meta information
+          high_key_ = rnode->high_key_;
+          sibling_ = rnode->sibling_;
+          rnode->sibling_ = this;
+
+          if(!rnode->control_.has_sibling()) {
+            control_.clear_sibling();
+          }
+
+          rnode->control_.set_delete();
+          rnode->control_.update_version();// inform lookup thread
+        }
+        rnode->control_.unlatch_exclusive();
+      }
+    }
+  }
+
+ public:
+  LeafNode() : control_(true), bitmap_(0),
+               high_key_(0), sibling_(nullptr) {}
+
+  ~LeafNode() {
+    uint64_t mask = bitmap_;
+    while(mask) {
+      int idx = index_least1(mask);
+      KVPair* kv = kvs_[idx].load(load_order);
+      kv->~KVPair();
+      free(kv);
+      mask &= ~(0x01ul << idx);
+    }
+    if(control_.has_sibling()) {
+      sibling_->~LeafNode();
+      free(sibling_);
+    }
+  }
+
+  int knum() { return popcount(bitmap_); }
+
+  func_used void exhibit() {
+    std::vector<K> keys;
+    int nkey = popcount(bitmap_), idx;
+    keys.reserve(nkey);
+    uint64_t mask = bitmap_;
+    while(mask) {
+      idx = index_least1(mask);
+      KVPair* kv = kvs_[idx].load(load_order);
+      keys.push_back(kv->key);
+      mask &= ~(0x01ul << idx);
+    }
+    std::sort(keys.begin(), keys.end());
+
+    std::cout << "leaf node " << control_.deleted() << " " << this << ": ";
+    for(int kid = 0; kid < nkey; kid++)
+      std::cout << keys[kid] << " ";
+    std::cout << std::endl;
+  }
+
+  bool to_sibling(K key, void*& next) {
+    // key must be normal encoding form
+    if(control_.deleted()) { // current node has been deleted
+      next = sibling_;
+      return true;
+    }
+
+    if(control_.has_sibling() && high_key_ < key) {
+      next = sibling_;
+      return true;
+    }
+    return false;
+  }
+
+  // lookup can be executed concurrently with lookup, update, upsert, remove
+  KVPair* lookup(K key) { // key must be normal encoding form
+    char tag = hash(key); // finger print generation
+    uint64_t mask = bitmap_ & compare_equal(tags_, tag); // candidates
+
+    int idx;
+    while(mask) { // check whether the key exists or not
+      idx = index_least1(mask);
+      KVPair* kv = kvs_[idx].load(load_order);
+      // some other threads may be splitting or removing
+      if(kv != nullptr && key == kv->key) { return kv; }
+      mask &= ~(0x01ul << idx);
+    }
+
+    return nullptr;
+  }
+
+  // update can be executed concurrently with update, lookup, upsert, remove
+  KVPair* update(KVPair* kv) {
+    char tag = hash(kv->key); // finger print generation
+    uint64_t mask = bitmap_ & compare_equal(tags_, tag); // candidates
+
+    int idx;
+    while(mask) {
+      idx = index_least1(mask);
+      KVPair* old = kvs_[idx].load(load_order);
+      while(old != nullptr && kv->key == old->key) {
+        if(kvs_[idx].compare_exchange_strong(old, kv)) {
+          return old; // update operation succeeded
+        }
+        using namespace std::chrono_literals;
+        std::this_thread::sleep_for(1us);
+        // if failed because other threads' updates, try again
+      }
+      mask &= ~(0x01ul << idx);
+    }
+
+    // failed because other threads' upsert or remove, return (version has changed)
+    // failed because the key doesn't exist
+    return nullptr;
+  }
+
+  // upsert can be executed concurrently with lookup, update
+  KVPair* upsert(KVPair* kv, void*& rnode, K& mid) {
+    /* if the key has already existed, update it and return the old kv pointer,
+     * otherwise successfully insert the ky, and return a nullptr, mid must be
+     * converted to suitable encoding form before return */
+    char tag = hash(kv->key); // finger print generation
+    uint64_t mask = bitmap_ & compare_equal(tags_, tag); // candidates
+
+    LeafNode* node = this;
+    rnode = nullptr;
+
+    int idx;
+    while(mask) {  // check whether the key exists or not
+      idx = index_least1(mask);
+      KVPair* old = kvs_[idx].load(load_order);
+      // old can't be nullptr, must be a valid pointer
+      if(kv->key == old->key) {
+        // using exchange, because other update operations may happen concurrently
+        return kvs_[idx].exchange(kv); // get the latest value, and set it to kv
+      }
+      mask &= ~(0x01ul << idx);
+    }
+
+    control_.update_version();  // it has been confirmed that we need to insert the key
+    // into current node even split the node, update node's version, don't need to update
+    // the right node's version, because other threads can't access the right node now
+
+    idx = index_least0(bitmap_); // find an empty slot
+    //if idx != full_idx, the node has an empty slot
+    if(idx == full_idx()) { // full, need split
+      // phase 1, keys sorting
+      std::vector<std::pair<K, int>> keys;
+      keys.reserve(kNodeSize);
+      for(int i = 0; i < kNodeSize; i++) {
+        KVPair* kv = kvs_[i].load(load_order);
+        keys.push_back(std::make_pair(kv->key, i));
+      }
+
+      auto less = [](std::pair<K, int>& a,
+                     std::pair<K, int>& b) {
+        return a.first < b.first;
+      };
+      std::sort(keys.begin(), keys.end(), less);
+
+      // phase 2, splitting
+      rnode = malloc(sizeof(LeafNode));
+      new(rnode) LeafNode();
+      if(!control_.has_sibling() && kv->key > keys.back().first) {
+        /* the rightmost node without sibling and key is greater than
+         * all keys especially effective for sequential insertion */
+        idx = 0, node = (LeafNode*) rnode;
+
+        /* set corresponding variables before setting flag */
+        sibling_ = (LeafNode*) rnode;
+        high_key_ = keys.back().first;
+        control_.set_sibling();
+      } else {
+        // normal split, move half key-value pairs to the new node
+        mask = 0x00ul;  // clear mask, mark keys moved to right node
+        int i = kNodeSize / 2, rid = 0, lid;
+        for(; i < kNodeSize; i++, rid++) {
+          lid = keys[i].second;
+          mask |= (0x01ul << lid);
+          ((LeafNode*) rnode)->tags_[rid] = tags_[lid];
+          // some other threads may be updating concurrently
+          // using exchange to interact with these threads correctly
+          // get the latest value, and set it to null
+          KVPair* kv = kvs_[lid].exchange(nullptr);
+          ((LeafNode*) rnode)->kvs_[rid].store(kv, store_order);
+        }
+
+        /* set corresponding variables before setting flag */
+        ((LeafNode*) rnode)->bitmap_ = half_fill();
+        ((LeafNode*) rnode)->sibling_ = sibling_;
+        ((LeafNode*) rnode)->high_key_ = high_key_;
+
+        assert(popcount(mask) == kNodeSize / 2);
+        bitmap_ &= ~mask;  // remove keys in leaf node
+        assert(popcount(bitmap_) == kNodeSize / 2);
+        sibling_ = (LeafNode*) rnode;
+        high_key_ = keys[kNodeSize / 2 - 1].first;
+
+        if(!control_.has_sibling()) control_.set_sibling();
+        else ((LeafNode*) rnode)->control_.set_sibling();
+
+        if(kv->key > high_key_) {
+          idx = kNodeSize / 2;
+          node = (LeafNode*) rnode;
+        } else { idx = lid; } // less than high key, select an empty slot in left node
+      }
+
+      mid = encode_convert(high_key_);
+    }
+
+    assert((node->bitmap_ & (0x01ul << idx)) == 0);
+    //insert the key into node
+    node->kvs_[idx].store(kv, store_order);
+    node->tags_[idx] = tag;
+    node->bitmap_ |= (0x01ul << idx);
+
+    return nullptr;
+  }
+
+  // upsert can be executed concurrently with lookup, update
+  KVPair* remove(K key, void*& mnode, K& mid) { // mnode: merged node
+    /* key must be normal encoding form, return the old kv (or nullptr),
+     * mid must be converted to suitable encoding form before return */
+    char tag = hash(key); // finger print generation
+    uint64_t mask = bitmap_ & compare_equal(tags_, tag); // candidates
+    mnode = nullptr;
+
+    int idx;
+    while(mask) { // check whether the key exists or not
+      idx = index_least1(mask);
+      KVPair* kv = kvs_[idx].load(load_order);
+      // kv can't be nullptr, must be a valid pointer
+      if(kv->key == key) {
+        control_.update_version(); // key exists, update node version
+        bitmap_ &= ~(0x01ul << idx); // update bitmap
+        // using exchange, because other update operations may happen concurrently
+        kv = kvs_[idx].exchange(nullptr); // get the latest value, and set it to null
+        merge(mnode, mid);  // try to merge with sibling
+        return kv;
+      }
+      mask &= ~(0x01ul << idx);
+    }
+
+    return nullptr; // key does not exist
+  }
+};
+
+}
+
+#endif //INDEXRESEARCH_LNODE_H
