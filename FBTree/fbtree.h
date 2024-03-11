@@ -52,10 +52,18 @@ class alignas(64) FBTree {
   //By default, kv is destruct and then the memory block of kv is freed
   ~FBTree() {
     for(int rid = 0; rid < tree_depth_; rid++) {
-      void* node = root_track_[rid];
-      if(is_leaf(node)) leaf(node)->~LeafNode();
-      else inner(node)->~InnerNode();
-      free(node);
+      void* node = root_track_[rid], * sibling;
+      while(node) {
+        if(is_leaf(node)) {
+          leaf(node)->~LeafNode();
+          sibling = leaf(node)->sibling();
+        } else {
+          inner(node)->~InnerNode();
+          sibling = inner(node)->sibling();
+        }
+        free(node);
+        node = sibling;
+      }
     }
     delete epoch_;
   }
@@ -67,8 +75,15 @@ class alignas(64) FBTree {
     stat["index depth"] = tree_depth_;
     for(int rid = 0; rid < tree_depth_; rid++) {
       void* node = root_track_[rid];
-      if(is_leaf(node)) leaf(node)->statistic(stat);
-      else inner(node)->statistic(stat);
+      while(node) {
+        if(is_leaf(node)) {
+          leaf(node)->statistic(stat);
+          node = leaf(node)->sibling();
+        } else {
+          inner(node)->statistic(stat);
+          node = inner(node)->sibling();
+        }
+      }
     }
     stat["load factor"] = stat["kv pair num"] / (stat["leaf num"] * Constant<K>::kNodeSize);
 
@@ -127,6 +142,8 @@ class alignas(64) FBTree {
 
       /* set root after it has been latched, otherwise some
        * thread may read root node before it has been set */
+      // make the three nodes one logical entity, so no other
+      // threads can modify the global var, root, tree_depth
       latch_exclusive(work);
       if(current == root_) {
         root_track_[rootid] = work;
@@ -206,13 +223,17 @@ class alignas(64) FBTree {
       if(merged) merged = inner(work)->remove(mid, up, index);
       else up = inner(work)->border_update(mid, index);
 
-      if(work == root_) { // wor has been latched
+      if(work == root_) { // work has been latched
         merged = nullptr, up = false;
         next = inner(work)->root_remove();
         if(next) {
           root_ = next, tree_depth_--;
           epoch_->retire(work);
+          assert(next == current);
         }
+        // ensure root is latched when setting global root, tree_depth,
+        // makes the three node one logical entity (old root, the merged
+        // node, new root(current)), so no other threads can modify global var
         unlatch_exclusive(current);
       }
 
@@ -265,9 +286,10 @@ class alignas(64) FBTree {
         version = control(node)->begin_read();
       }
       kv = leaf(node)->lookup(key);
+      if(kv != nullptr) return kv; // find it
     } while(!control(node)->end_read(version));
 
-    return kv;
+    return nullptr; // the key doesn't exist
   }
 };
 

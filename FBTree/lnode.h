@@ -125,16 +125,14 @@ class alignas(Config::kAlignSize) LeafNode {
       free(kv);
       mask &= ~(0x01ul << idx);
     }
-    if(control_.has_sibling()) {
-      sibling_->~LeafNode();
-      free(sibling_);
-    }
+  }
+
+  void* sibling() {
+    if(control_.has_sibling()) { return sibling_; }
+    return nullptr;
   }
 
   void statistic(std::map<std::string, double>& stat) {
-    if(control_.has_sibling()) {
-      sibling_->statistic(stat);
-    }
     stat["index size"] += sizeof(LeafNode);
     stat["leaf num"] += 1;
     stat["kv pair num"] += popcount(bitmap_);

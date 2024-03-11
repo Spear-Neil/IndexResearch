@@ -406,18 +406,16 @@ class alignas(Config::kAlignSize) InnerNode {
  public:
   InnerNode() : control_(false), knum_(0), plen_(0), next_(nullptr) {}
 
-  ~InnerNode() {
-    if(control_.has_sibling()) {
-      ((InnerNode*) next_)->~InnerNode();
-      free(next_);
-    }
+  ~InnerNode() {}
+
+  void* sibling() {
+    if(control_.has_sibling()) { return next_; }
+    return nullptr;
   }
 
   void statistic(std::map<std::string, double>& stat) {
-    if(control_.has_sibling()) {
-      stat["index size"] += sizeof(InnerNode);
-      stat["inner num"] += 1;
-    }
+    stat["index size"] += sizeof(InnerNode);
+    stat["inner num"] += 1;
   }
 
   func_used void exhibit() {
@@ -583,15 +581,14 @@ class alignas(Config::kAlignSize) InnerNode {
   }
 
   bool border_update(K mid, int index) {
-    if(index < knum_) {
-      control_.update_version();
-      memory_expand();
-      for(int rid = 0; rid < kFeatureSize; rid++)
-        features_[rid][index] = ((char*) &mid)[rid];
-      memory_shrink();
-    }
+    CONDITION_ERROR(index < 0 || index >= knum_, "border update error");
+    control_.update_version();
+    memory_expand();
+    for(int rid = 0; rid < kFeatureSize; rid++)
+      features_[rid][index] = ((char*) &mid)[rid];
+    memory_shrink();
 
-    return (knum_ - 1) == index;
+    return control_.has_sibling() && (knum_ - 1) == index;
   }
 
   void* root_remove() {
