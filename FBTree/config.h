@@ -22,8 +22,10 @@ struct Config {
   static constexpr int kAlignSize = 64;
   /* the initial extend page size (for outer prefix and anchor) */
   static constexpr int kExtendSize = 2048;
-  /* prefetch inner node and leaf node before lookup */
+  /* prefetch inner node and leaf node before access node */
   static constexpr bool kNodePrefetch = true;
+  /* node prefetch size, default 4 cache line */
+  static constexpr int kPrefetchSize = 4;
 
   /** config for debugging */
   static constexpr bool kPrintKey = true;

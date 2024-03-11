@@ -40,6 +40,13 @@ class alignas(64) FBTree {
 
   void unlatch_exclusive(void* node) { control(node)->unlatch_exclusive(); }
 
+  void node_prefetch(void* node) {
+    if(Config::kNodePrefetch) {
+      for(int i = 0; i < Config::kPrefetchSize; i++)
+        prefetcht0((char*) node + i * 64);
+    }
+  }
+
  public:
   FBTree() {
     root_ = malloc(sizeof(LeafNode));
@@ -102,6 +109,7 @@ class alignas(64) FBTree {
 
   // kv should be allocated by malloc
   KVPair* upsert(KVPair* kv) {
+    assert(epoch_->guarded());
     std::vector<void*> path_stack;
     path_stack.reserve(tree_depth_);
     K mid = encode_convert(kv->key);
@@ -112,6 +120,7 @@ class alignas(64) FBTree {
       work = current;
       if(!inner(work)->to_next(mid, current))
         path_stack.push_back(work); // move to a child or a sibling
+      node_prefetch(current);
     }
 
     // reach leaf node
@@ -174,6 +183,7 @@ class alignas(64) FBTree {
   }
 
   KVPair* remove(K key) {
+    assert(epoch_->guarded());
     std::vector<void*> path_stack;
     path_stack.reserve(tree_depth_);
     K mid = encode_convert(key);
@@ -184,6 +194,7 @@ class alignas(64) FBTree {
       work = current;
       if(!inner(work)->to_next(mid, current))
         path_stack.push_back(work);
+      node_prefetch(current);
     }
 
     // reach leaf node
@@ -246,10 +257,12 @@ class alignas(64) FBTree {
 
   // kv should be allocated by malloc
   KVPair* update(KVPair* kv) {
+    assert(epoch_->guarded());
     K key = encode_convert(kv->key);
     void* node = root_;
     while(!is_leaf(node)) {
       inner(node)->to_next(key, node);
+      node_prefetch(node);
     }
 
     uint64_t version;
@@ -272,10 +285,12 @@ class alignas(64) FBTree {
   }
 
   KVPair* lookup(K key) {
+    assert(epoch_->guarded());
     K cvt_key = encode_convert(key);
     void* node = root_;
     while(!is_leaf(node)) {
       inner(node)->to_next(cvt_key, node);
+      node_prefetch(node);
     }
 
     uint64_t version;
