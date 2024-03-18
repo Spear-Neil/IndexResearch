@@ -11,16 +11,17 @@ namespace FeatureBTree {
 class Control {
   std::atomic<uint64_t> control_;
 
+  static constexpr uint64_t kOrderBit = 0x10;   // kv pairs in leaf node are ordered
   static constexpr uint64_t kLeafBit = 0x8;     // current node is a leaf node
   static constexpr uint64_t kSiblingBit = 0x4;  // current node has sibling node
   static constexpr uint64_t kLockBit = 0x2;     // concurrency control
   static constexpr uint64_t kDelBit = 0x1;      // current node has been deleted
 
-  static constexpr uint64_t kSplitMask = 0x0000'0000'000F'FFF0;   // current node is splitting, only used by leaf node
-  static constexpr uint64_t kVersionMask = 0xFFFF'FFFF'FFF0'0000; // node version, monotone increasing
+  static constexpr uint64_t kSplitMask = 0x0000'0000'00FF'FF00;   // current node is splitting, only used by leaf node
+  static constexpr uint64_t kVersionMask = 0xFFFF'FFFF'FF00'0000; // node version, monotone increasing
 
-  static constexpr uint64_t kSplitOne = 0x0000'0000'0000'0010;
-  static constexpr uint64_t kVersionOne = 0x0000'0000'0010'0000;
+  static constexpr uint64_t kSplitOne = 0x0000'0000'0000'0100;
+  static constexpr uint64_t kVersionOne = 0x0000'0000'0100'0000;
 
   static constexpr std::memory_order load_order = std::memory_order_acquire;
   static constexpr std::memory_order store_order = std::memory_order_release;
@@ -29,6 +30,8 @@ class Control {
   Control() = delete;
 
   Control(bool is_leaf) : control_(is_leaf ? kLeafBit : 0) {}
+
+  bool ordered() { return control_.load(load_order) & kOrderBit; }
 
   /* current node is a leaf node, also can be implemented
    * by using 1 least significant bit in pointer, such as ART */
@@ -81,6 +84,16 @@ class Control {
   void end_splitting() {
     uint64_t old = control_.fetch_sub(kSplitOne);
     CONDITION_ERROR((old & kSplitMask) == 0, "fatal error, split token under flow!");
+  }
+
+  void set_order() {
+    uint64_t old = control_.fetch_add(kOrderBit);
+    CONDITION_ERROR((old & kOrderBit) != 0, "fatal error, kv pairs were originally ordered");
+  }
+
+  void clear_order() {
+    uint64_t old = control_.fetch_sub(kOrderBit);
+    CONDITION_ERROR((old & kOrderBit) == 0, "fatal error, kv pairs were originally unordered");
   }
 
   void set_delete() {

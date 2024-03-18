@@ -19,13 +19,65 @@ template<typename K, typename V>
 class alignas(64) FBTree {
   typedef FeatureBTree::LeafNode<K, V> LeafNode;
   typedef FeatureBTree::InnerNode<K> InnerNode;
-  typedef FeatureBTree::KVPair<K, V> KVPair;
   static constexpr int kMaxHeight = 13;
 
   void* root_;                  // root node
   int tree_depth_;              // tree depth/height
   Epoch* epoch_;                // epoch-based memory reclaimer
   void* root_track_[kMaxHeight];// track the root node
+
+ public:
+  typedef FeatureBTree::KVPair<K, V> KVPair;
+
+  class alignas(32) iterator {
+    LeafNode* node_;   // the leaf node pointed by current iterator
+    uint64_t version_; // the version of leaf node at the last access
+    KVPair* kv_;       // the kv pointed by current iterator, null means the end
+    int pos_;          // the ordinal of kv in current node (ordered view)
+
+   public:
+    iterator() : node_(nullptr), kv_(nullptr) {}
+
+    iterator(LeafNode* node, uint64_t version, KVPair* kv, int pos) :
+      node_(node), version_(version), kv_(kv), pos_(pos) {}
+
+    iterator(const iterator& it)
+      : node_(it.node_), version_(it.version_),
+        kv_(it.kv_), pos_(it.pos_) {}
+
+    // does current iterator point to the end
+    bool end() { return kv_ != nullptr; }
+
+    iterator& advance() {
+      assert(kv_ != nullptr);
+      KVPair* next;
+      int pos;
+      uint64_t version;
+      // first, try to get the next kv in current node
+      std::tie(next, pos, version) = node_->access(kv_, pos_ + 1, version_);
+
+      // if we can't get the next kv in current node, go to its sibling node
+      while(next == nullptr) {
+        node_ = (LeafNode*) (node_->sibling());
+        if(node_ == nullptr) break;
+        // enforce using bound to get next kv
+        std::tie(next, pos, version) = node_->access(kv_, 0, 0);
+      }
+      kv_ = next, pos_ = pos, version_ = version;
+
+      return *this;
+    }
+
+    iterator& operator=(const iterator& it) {
+      node_ = it.node_, version_ = it.version_;
+      kv_ = it.kv_, pos_ = it.pos_;
+      return *this;
+    }
+
+    KVPair* operator->() { return kv_; }
+
+    KVPair& operator*() { return *kv_; }
+  };
 
  private:
   Control* control(void* node) { return (Control*) node; }
@@ -47,6 +99,66 @@ class alignas(64) FBTree {
     }
   }
 
+  iterator bound(K key, bool upper) {
+    // true for upper_bound, false for lower_bound
+    assert(epoch_->guarded());
+    K cvt_key = encode_convert(key);
+    void* node = root_;
+    while(!is_leaf(node)) {
+      inner(node)->to_next(cvt_key, node);
+      node_prefetch(node);
+    }
+
+    // reach leaf node
+    uint64_t version;
+    KVPair* kv;
+    int pos;
+
+    auto get_bound = [&]() {
+      bool unordered = false;
+
+      do {
+        version = control(node)->begin_read();
+        while(leaf(node)->to_sibling(key, node)) {
+          version = control(node)->begin_read();
+        }
+        if(!control(node)->ordered()) {
+          unordered = true;
+          break;
+        }
+        // if kv pairs in node are ordered, try to get boundary kv without lock
+        std::tie(kv, pos) = leaf(node)->bound(key, upper);
+      } while(!control(node)->end_read(version));
+
+      // if kv pairs in node are unordered, lock the node and then get boundary kv
+      if(unordered) {
+        latch_exclusive(node);
+        void* sibling;
+        while(leaf(node)->to_sibling(key, sibling)) {
+          latch_exclusive(sibling);
+          unlatch_exclusive(node);
+          node = sibling;
+        }
+        leaf(node)->kv_sort();
+        std::tie(kv, pos) = leaf(node)->bound(key, upper);
+        version = control(node)->load_version();
+        unlatch_exclusive(node);
+      }
+    };
+
+    get_bound();
+    // because high_key is never removed unless merge,
+    // so the boundary kv may be on the sibling node
+    while(kv == nullptr) {
+      node = leaf(node)->sibling();
+      if(node == nullptr) break;
+      // if kv is null, however node has sibling
+      get_bound();
+    }
+
+    return iterator((LeafNode*) node, version, kv, pos);
+  }
+
  public:
   FBTree() {
     root_ = malloc(sizeof(LeafNode));
@@ -57,7 +169,7 @@ class alignas(64) FBTree {
   }
 
   //By default, kv is destruct and then the memory block of kv is freed
-  ~FBTree() {
+  ~FBTree() { // recursive destructor result in stackoverflow
     for(int rid = 0; rid < tree_depth_; rid++) {
       void* node = root_track_[rid], * sibling;
       while(node) {
@@ -305,6 +417,25 @@ class alignas(64) FBTree {
     } while(!control(node)->end_read(version));
 
     return nullptr; // the key doesn't exist
+  }
+
+  iterator begin() {
+    assert(epoch_->guarded());
+    LeafNode* node = leaf(root_track_[0]);
+    assert(node != nullptr);
+    iterator it(node, nullptr, 0);
+    it.version_ = control(node)->begin_read();
+    std::tie(it.kv_, it.pos_, it.version_) =
+      node->access(nullptr, 0, it.version_);
+    return it;
+  }
+
+  iterator lower_bound(K key) {
+    return bound(key, false);
+  }
+
+  iterator upper_bound(K key) {
+    return bound(key, true);
   }
 };
 

@@ -52,14 +52,9 @@ class alignas(Config::kAlignSize) InnerNode {
   uint64_t bitmap() {
     CONDITION_ERROR(knum_ < 0 || knum_ > kNodeSize, "error knum");
     if(kNodeSize == 64) {
-      if(knum_ == kNodeSize) {
-        return 0xFFFF'FFFF'FFFF'FFFFul;
-      } else {
-        return (0x01ul << knum_) - 1;
-      }
-    } else {
-      return (0x01ul << knum_) - 1;
-    }
+      if(knum_ == kNodeSize) { return 0x00ul - 1; }
+      else { return (0x01ul << knum_) - 1; }
+    } else { return (0x01ul << knum_) - 1; }
   }
 
   int to_next_phase1(K key, void*& next, bool& to_sibling) {
@@ -411,7 +406,7 @@ class alignas(Config::kAlignSize) InnerNode {
   void* sibling() {
     if(control_.has_sibling()) { return next_; }
     return nullptr;
-  }
+  } // only used by statistics
 
   void statistic(std::map<std::string, double>& stat) {
     stat["index size"] += sizeof(InnerNode);

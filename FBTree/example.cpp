@@ -19,6 +19,7 @@ void simple_test(size_t nkey, int nthd, bool shuffle) {
   std::vector<double> tpts;
   std::mutex lock;
   double itpt = 0, utpt = 0, stpt = 0, rtpt = 0;
+  double scan_tpt = 0;
   tree.node_parameter();
 
   std::cout << "-- data prepare ... " << std::flush;
@@ -128,6 +129,36 @@ void simple_test(size_t nkey, int nthd, bool shuffle) {
   workers.clear();
   tpts.clear();
   pinning.reset_pinning_counter(0, 0);
+  std::cout << "-- scan ... " << std::flush;
+  for(int tid = 0; tid < nthd; tid++) {
+    workers.push_back(std::thread([&](int tid) {
+      pinning.pinning_thread_continuous(pthread_self());
+      Timer<> timer;
+      size_t begin = nkey * tid / nthd;
+      size_t end = nkey * (tid + 1) / nthd;
+      timer.start();
+      for(size_t i = begin; i < end; i++) {
+        EpochGuard epoch_guard(tree.get_epoch());
+        auto it = tree.lower_bound(data[i]);
+        for(int i = 0; i < 10 && !it.end(); i++) {
+          it.advance();
+        }
+      }
+      long drt = timer.duration_us();
+      std::lock_guard<std::mutex> guard(lock);
+      tpts.push_back(double(end - begin) / drt);
+    }, tid));
+  }
+  for(int tid = 0; tid < nthd; tid++) {
+    workers[tid].join();
+    scan_tpt += tpts[tid];
+  }
+  std::cout << "end" << std::endl;
+
+  if(shuffle) shuffle_func();
+  workers.clear();
+  tpts.clear();
+  pinning.reset_pinning_counter(0, 0);
   std::cout << "-- remove ... " << std::flush;
   for(int tid = 0; tid < nthd; tid++) {
     workers.push_back(std::thread([&](int tid) {
@@ -155,6 +186,7 @@ void simple_test(size_t nkey, int nthd, bool shuffle) {
   std::cout << "-- insert opus: " << itpt << std::endl;
   std::cout << "-- update opus: " << utpt << std::endl;
   std::cout << "-- lookup opus: " << stpt << std::endl;
+  std::cout << "-- scan opus: " << scan_tpt << std::endl;
   std::cout << "-- remove opus: " << rtpt << std::endl;
   tree.statistics();
 }
