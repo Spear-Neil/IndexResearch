@@ -221,6 +221,7 @@ class alignas(Config::kAlignSize) LeafNode {
         using namespace std::chrono_literals;
         std::this_thread::sleep_for(1us);
         // if failed because other threads' updates, try again
+        old = kvs_[idx].load(load_order); // get the latest kv
       }
       mask &= ~(0x01ul << idx);
     }
