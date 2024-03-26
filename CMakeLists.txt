@@ -3,6 +3,7 @@ project(IndexResearch)
 set(CMAKE_CXX_STANDARD 17)
 
 include_directories(util)
+include_directories(STX/tlx)
 
 execute_process(COMMAND lscpu COMMAND grep avx512bw OUTPUT_VARIABLE AVX512BW_ENABLE)
 execute_process(COMMAND lscpu COMMAND grep avx2 OUTPUT_VARIABLE AVX2_ENABLE)
@@ -28,7 +29,9 @@ if (NOT (AVX512BW_ENABLE OR AVX2_ENABLE OR SSE2_ENABLE))
 endif ()
 
 add_subdirectory(FBTree)
+add_subdirectory(GoogleBTree)
+add_subdirectory(STX)
 
 add_compile_options(-march=native)
 link_libraries(pthread numa jemalloc tbb)
-add_executable(IndexResearch main.cpp)
+add_executable(CacheMissTest cache_miss.cpp)
