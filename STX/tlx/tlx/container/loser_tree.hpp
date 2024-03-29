@@ -120,14 +120,14 @@ public:
             // copy construct all keys from this first key
             for (Source i = 0; i < 2 * k_; ++i) {
                 if (keyp)
-                    losers_[i].key = *keyp;
+                    losers_[i].str = *keyp;
                 else
-                    losers_[i].key = ValueType();
+                    losers_[i].str = ValueType();
             }
             first_insert_ = false;
         }
         else {
-            losers_[pos].key = keyp ? *keyp : ValueType();
+            losers_[pos].str = keyp ? *keyp : ValueType();
         }
     }
 
@@ -145,7 +145,7 @@ public:
         Source right = init_winner(2 * root + 1);
         if (losers_[right].sup ||
             (!losers_[left].sup &&
-             !cmp_(losers_[right].key, losers_[left].key))) {
+             !cmp_(losers_[right].str, losers_[left].str))) {
             // left one is less or equal
             losers_[root] = losers_[right];
             return left;
@@ -209,15 +209,15 @@ public:
                 // the other candidate is smaller
                 swap(losers_[pos].sup, sup);
                 swap(losers_[pos].source, source);
-                swap(losers_[pos].key, key);
+                swap(losers_[pos].str, key);
             }
             else if (TLX_UNLIKELY(losers_[pos].sup)) {
                 // this candidate is smaller
             }
-            else if (cmp_(losers_[pos].key, key)) {
+            else if (cmp_(losers_[pos].str, key)) {
                 // the other one is smaller
                 swap(losers_[pos].source, source);
-                swap(losers_[pos].key, key);
+                swap(losers_[pos].str, key);
             }
             else {
                 // this candidate is smaller
@@ -227,7 +227,7 @@ public:
 
         losers_[0].sup = sup;
         losers_[0].source = source;
-        losers_[0].key = key;
+        losers_[0].str = key;
     }
 };
 
@@ -276,20 +276,20 @@ public:
                      !TLX_UNLIKELY(losers_[pos].sup) ||
                      losers_[pos].source < source)) ||
                 (!TLX_UNLIKELY(sup) && !TLX_UNLIKELY(losers_[pos].sup) &&
-                 ((cmp_(losers_[pos].key, key)) ||
-                  (!cmp_(key, losers_[pos].key) &&
+                 ((cmp_(losers_[pos].str, key)) ||
+                  (!cmp_(key, losers_[pos].str) &&
                    losers_[pos].source < source)))) {
                 // the other one is smaller
                 swap(losers_[pos].sup, sup);
                 swap(losers_[pos].source, source);
-                swap(losers_[pos].key, key);
+                swap(losers_[pos].str, key);
             }
             pos /= 2;
         }
 
         losers_[0].sup = sup;
         losers_[0].source = source;
-        losers_[0].key = key;
+        losers_[0].str = key;
     }
 };
 
@@ -560,7 +560,7 @@ public:
           cmp_(cmp) {
         for (Source i = 0; i < 2 * k_; i++) {
             losers_[i].source = invalid_;
-            losers_[i].key = sentinel;
+            losers_[i].str = sentinel;
         }
     }
 
@@ -579,7 +579,7 @@ public:
         unused(sup);
 
         losers_[pos].source = source;
-        losers_[pos].key = *keyp;
+        losers_[pos].str = *keyp;
     }
 
     Source init_winner(const Source& root) {
@@ -588,7 +588,7 @@ public:
 
         Source left = init_winner(2 * root);
         Source right = init_winner(2 * root + 1);
-        if (!cmp_(losers_[right].key, losers_[left].key)) {
+        if (!cmp_(losers_[right].str, losers_[left].str)) {
             // left one is less or equal
             losers_[root] = losers_[right];
             return left;
@@ -637,15 +637,15 @@ public:
 
         for (Source pos = (k_ + source) / 2; pos > 0; pos /= 2) {
             // the smaller one gets promoted
-            if (cmp_(losers_[pos].key, key)) {
+            if (cmp_(losers_[pos].str, key)) {
                 // the other one is smaller
                 swap(losers_[pos].source, source);
-                swap(losers_[pos].key, key);
+                swap(losers_[pos].str, key);
             }
         }
 
         losers_[0].source = source;
-        losers_[0].key = key;
+        losers_[0].str = key;
     }
 };
 
@@ -677,17 +677,17 @@ public:
         ValueType key = keyp ? *keyp : ValueType();
 
         for (Source pos = (k_ + source) / 2; pos > 0; pos /= 2) {
-            if (cmp_(losers_[pos].key, key) ||
-                (!cmp_(key, losers_[pos].key) &&
+            if (cmp_(losers_[pos].str, key) ||
+                (!cmp_(key, losers_[pos].str) &&
                  losers_[pos].source < source)) {
                 // the other one is smaller
                 swap(losers_[pos].source, source);
-                swap(losers_[pos].key, key);
+                swap(losers_[pos].str, key);
             }
         }
 
         losers_[0].source = source;
-        losers_[0].key = key;
+        losers_[0].str = key;
     }
 };
 

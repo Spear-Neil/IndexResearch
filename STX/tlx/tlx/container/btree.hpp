@@ -1406,7 +1406,7 @@ private:
             {
                 unsigned short mid = (lo + hi) >> 1;
 
-                if (key_lessequal(key, n->key(mid))) {
+                if (key_lessequal(key, n->str(mid))) {
                     hi = mid; // key <= mid
                 }
                 else {
@@ -1421,7 +1421,7 @@ private:
             if (self_verify)
             {
                 unsigned short i = 0;
-                while (i < n->slotuse && key_less(n->key(i), key)) ++i;
+                while (i < n->slotuse && key_less(n->str(i), key)) ++i;
 
                 TLX_BTREE_PRINT("BTree::find_lower: testfind: " << i);
                 TLX_BTREE_ASSERT(i == lo);
@@ -1432,7 +1432,7 @@ private:
         else // for nodes <= binsearch_threshold do linear search.
         {
             unsigned short lo = 0;
-            while (lo < n->slotuse && key_less(n->key(lo), key)) ++lo;
+            while (lo < n->slotuse && key_less(n->str(lo), key)) ++lo;
             return lo;
         }
     }
@@ -1453,7 +1453,7 @@ private:
             {
                 unsigned short mid = (lo + hi) >> 1;
 
-                if (key_less(key, n->key(mid))) {
+                if (key_less(key, n->str(mid))) {
                     hi = mid; // key < mid
                 }
                 else {
@@ -1468,7 +1468,7 @@ private:
             if (self_verify)
             {
                 unsigned short i = 0;
-                while (i < n->slotuse && key_lessequal(n->key(i), key)) ++i;
+                while (i < n->slotuse && key_lessequal(n->str(i), key)) ++i;
 
                 TLX_BTREE_PRINT("BTree::find_upper testfind: " << i);
                 TLX_BTREE_ASSERT(i == hi);
@@ -1479,7 +1479,7 @@ private:
         else // for nodes <= binsearch_threshold do linear search.
         {
             unsigned short lo = 0;
-            while (lo < n->slotuse && key_lessequal(n->key(lo), key)) ++lo;
+            while (lo < n->slotuse && key_lessequal(n->str(lo), key)) ++lo;
             return lo;
         }
     }

@@ -2,6 +2,9 @@
 #define INDEXRESEARCH_TYPE_H
 
 #include <cstdint>
+#include "strutil.h"
+
+using util::compare;
 
 namespace FeatureBTree {
 
@@ -32,11 +35,35 @@ struct KVPair<int32_t, V> {
   V value;
 };
 
+struct String {
+  int len;      // string length
+  char str[];   // character array
+
+  String() = delete;
+
+  bool operator<(String& k) {
+    return compare(str, len, k.str, k.len) < 0;
+  }
+
+  bool operator>(String& k) {
+    return compare(str, len, k.str, k.len) > 0;
+  }
+
+  bool operator==(String& k) {
+    return !compare(str, len, k.str, k.len);
+  }
+
+  bool operator!=(String& k) {
+    return compare(str, len, k.str, k.len);
+  }
+};
+
 template<typename V>
-struct KVPair<char*, V> {
+struct KVPair<String, V> {
   V value;
-  int klen;   // key size
-  char key[]; // key array
+  String key;
+
+  KVPair() = delete;
 };
 
 }

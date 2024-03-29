@@ -6,3 +6,4 @@ add_compile_options(-march=native)
 link_libraries(pthread numa jemalloc tbb)
 
 add_executable(FBTreeExample example.cpp)
+add_executable(StringFBTreeExample sexample.cpp)

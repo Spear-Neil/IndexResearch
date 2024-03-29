@@ -19,16 +19,11 @@ struct Config {
    * and its sibling node is lss than MERGE_SIZE, merge the two node */
   static constexpr int kMergeSize = kNodeSize / 2;
   /* the memory alignment requirement of inner node and leaf node */
-  static constexpr int kAlignSize = 64;
-  /* the initial extend page size (for outer prefix and anchor) */
-  static constexpr int kExtendSize = 2048;
+  static constexpr int kAlignSize = 32;
   /* prefetch inner node and leaf node before access node */
   static constexpr bool kNodePrefetch = true;
   /* node prefetch size, default 4 cache line */
   static constexpr int kPrefetchSize = 4;
-
-  /** config for debugging */
-  static constexpr bool kPrintKey = true;
 };
 
 inline std::string compare_mode() {
@@ -42,13 +37,11 @@ inline std::string compare_mode() {
   }
 }
 
-static_assert(Config::kFeatureSize >= 0);
+static_assert(Config::kFeatureSize > 0);
 
 static_assert((Config::kNodeSize == 16 && Config::kCmpMode == SIMD128)
               || (Config::kNodeSize == 32 && Config::kCmpMode != SIMD512)
               || Config::kNodeSize == 64);
-
-static_assert(Config::kExtendSize % 2048 == 0);
 
 #ifndef AVX512BW_ENABLE
 static_assert(Config::kCmpMode != SIMD512);

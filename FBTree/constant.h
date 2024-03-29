@@ -5,9 +5,10 @@
 #include <cstdint>
 #include <limits>
 #include "config.h"
+#include "type.h"
 #include "common.h"
 
-using namespace util;
+using util::byte_swap;
 
 namespace FeatureBTree {
 
@@ -15,7 +16,7 @@ template<typename T>
 struct Constant;
 
 template<>
-struct Constant<char*> {
+struct Constant<String> {
   static constexpr int kNodeSize = Config::kNodeSize;
   static constexpr int kMergeSize = Config::kMergeSize;
   static constexpr int kFeatureSize = Config::kFeatureSize;
@@ -93,7 +94,7 @@ struct Constant<double> {
   static void node_parameter();
 };
 
-inline void Constant<char*>::node_parameter() {
+inline void Constant<String>::node_parameter() {
   std::cout << "-- node parameter: compare mode:" << compare_mode() << ", node size:" << kNodeSize
             << ", merge size:" << kMergeSize << ", feature size:" << kFeatureSize << std::endl;
 }

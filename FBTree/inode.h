@@ -6,12 +6,22 @@
 #include <cstring>
 #include <vector>
 #include "config.h"
+#include "type.h"
 #include "constant.h"
 #include "compare.h"
 #include "control.h"
-#include "type.h"
+#include "common.h"
 #include "macro.h"
 #include "log.h"
+#include "hash.h"
+
+using util::popcount;
+using util::index_least1;
+using util::countl_zero;
+using util::hash;
+using util::prefetcht0;
+using util::common_prefix;
+using util::aligned;
 
 namespace FeatureBTree {
 
@@ -22,11 +32,11 @@ class alignas(Config::kAlignSize) InnerNode {
   static constexpr int kFeatureSize = Constant<K>::kFeatureSize;
   static constexpr int kBitCnt = 64; // bits number of bitmap
 
-  Control control_;
-  int knum_;       // the number of keys
-  int plen_;       // the length of prefix
-  char prefix_[8];
-  void* next_;     // sibling or last child
+  Control control_; // synchronization, memory/compiler order
+  int knum_;        // the number of keys
+  int plen_;        // the length of prefix
+  char prefix_[8];  // prefix, shift subsequent bytes left
+  void* next_;      // sibling or last child
   char features_[kFeatureSize][kNodeSize];
   void* children_[kNodeSize];
 
@@ -283,7 +293,7 @@ class alignas(Config::kAlignSize) InnerNode {
       InnerNode* rnode = (InnerNode*) next_;
       int rnkey = rnode->knum_;
       CONDITION_ERROR(knum_ < 1, "merge error");
-      if(knum_ + rnkey <= kMergeSize) { // try to merge
+      if(knum_ + rnkey <= kMergeSize || rnkey == 0) { // try to merge
         rnode->control_.latch_exclusive();
         rnkey = rnode->knum_;
         // if rnkey = 0 (rightmost inner), merge immediately
@@ -323,8 +333,8 @@ class alignas(Config::kAlignSize) InnerNode {
     return merged;
   }
 
-  void border_extension() { // prefix extension
-    CONDITION_ERROR(knum_ < 1, "border extension error");
+  void bound_extension() { // prefix extension
+    CONDITION_ERROR(knum_ < 1, "bound extension error");
     int pid = 0;
     for(; pid < kFeatureSize - plen_; pid++) {
       if(features_[pid][0] != features_[pid][knum_ - 1]) break;
@@ -332,13 +342,13 @@ class alignas(Config::kAlignSize) InnerNode {
     }
     if(pid > 0) {
       void* src = features_[pid], * dst = features_[0];
-      CONDITION_ERROR(kFeatureSize - plen_ - pid < 0, " border extension error");
+      CONDITION_ERROR(kFeatureSize - plen_ - pid < 0, "bound extension error");
       memmove(dst, src, (kFeatureSize - plen_ - pid) * kNodeSize);
       plen_ += pid;
     }
   }
 
-  void* border_remove(K& mid, bool& up, int index) {
+  void* bound_remove(K& mid, bool& up, int index) {
     CONDITION_ERROR(up != false, "up is uninitialized");
     void* merged = nullptr;
     if(!control_.has_sibling()) {
@@ -346,7 +356,7 @@ class alignas(Config::kAlignSize) InnerNode {
       next_ = children_[index];
       knum_ -= 1;
       if(knum_ == 0) plen_ = 0;
-      else border_extension();
+      else bound_extension();
     } else {
       InnerNode* rnode = (InnerNode*) next_;
       rnode->control_.latch_exclusive();
@@ -389,7 +399,7 @@ class alignas(Config::kAlignSize) InnerNode {
         }
         rnode->children_[0] = children_[index];
         knum_ -= 1;
-        border_extension();
+        bound_extension();
       }
 
       rnode->control_.unlatch_exclusive();
@@ -406,7 +416,7 @@ class alignas(Config::kAlignSize) InnerNode {
   void* sibling() {
     if(control_.has_sibling()) { return next_; }
     return nullptr;
-  } // only used by statistics
+  }
 
   void statistic(std::map<std::string, double>& stat) {
     stat["index size"] += sizeof(InnerNode);
@@ -460,11 +470,10 @@ class alignas(Config::kAlignSize) InnerNode {
 
           // less than features corresponding to mask
           if(mask == 0) {
-            if(eqmask == 0) {
-              idx = 0; // the right most node, all separators have been
-              // deleted, but hasn't been merged to its left sibling
-            } else idx = index_least1(eqmask);
-          } else idx = kBitCnt - countl_zero(mask);
+            if(eqmask == 0) { idx = 0; }// the right most node, all separators
+              // have been deleted, but hasn't been merged to its left sibling
+            else { idx = index_least1(eqmask); }
+          } else { idx = kBitCnt - countl_zero(mask); }
         } else {
           CONDITION_ERROR((popcount(eqmask) != 1), "more than two candidates");
           idx = index_least1(eqmask);
@@ -572,16 +581,597 @@ class alignas(Config::kAlignSize) InnerNode {
 
     // index == nkey - 1
     CONDITION_ERROR(index != knum_ - 1, "remove error");
-    return border_remove(mid, up, index);
+    return bound_remove(mid, up, index);
   }
 
-  bool border_update(K mid, int index) {
-    CONDITION_ERROR(index < 0 || index >= knum_, "border update error");
+  bool anchor_update(K mid, int index) {
+    CONDITION_ERROR(index < 0 || index >= knum_, "anchor update error");
     control_.update_version();
     memory_expand();
     for(int rid = 0; rid < kFeatureSize; rid++)
       features_[rid][index] = ((char*) &mid)[rid];
     memory_shrink();
+
+    return control_.has_sibling() && (knum_ - 1) == index;
+  }
+
+  void* root_remove() {
+    if(knum_ == 0) {
+      control_.set_delete();
+      return next_; // the new root
+    }
+    return nullptr;
+  }
+};
+
+
+template<>
+class alignas(Config::kAlignSize) InnerNode<String> {
+  static constexpr int kNodeSize = Constant<String>::kNodeSize;
+  static constexpr int kMergeSize = Constant<String>::kMergeSize;
+  static constexpr int kFeatureSize = Constant<String>::kFeatureSize;
+  static constexpr int kEmbedPrSize = 224; // length of embedded prefix
+  static constexpr int kBitCnt = 64; // bits number of bitmap
+  /* for a slab memory allocator like jemalloc, malloc always allocates a memory
+   * block whose size is grater than or equal to the size we need, so we use the
+   * excess memory for embedded prefix: the default size of embedded prefix is 224,
+   * 1536 - 32 - 4 * 64 - 8 * 64 - 8 * 64 = 224, feature size: 4, node size: 64
+   * 896 - 32 - 4 * 32 - 8 * 32 - 8 * 32 = 224, feature size: 4, node size: 32 */
+
+  struct PrTag {
+    uint16_t tag: 16; // hashtag of prefix
+    uint64_t ptr: 48; // points to first key
+  }; // assumption: 64-bit machine
+  static_assert(sizeof(PrTag) == 8 && sizeof(void*) == 8);
+
+  Control control_; // synchronization, memory/compiler order
+  int knum_;        // the number of keys
+  int plen_;        // the length of prefix
+  PrTag ptag_;      // prefix and its tag
+  void* next_;      // sibling or last child
+
+  char features_[kFeatureSize][kNodeSize];
+  char embed_[kEmbedPrSize];   // embedded prefix
+  String* anchors_[kNodeSize]; // anchor keys, just pointers
+  void* children_[kNodeSize];  // child nodes
+
+ private:
+  uint64_t compare_equal(void* p, char c) {
+    if(kNodeSize == 64)
+      return compare_equal_64(p, c);
+    else if(kNodeSize == 32)
+      return compare_equal_32(p, c);
+    else if(kNodeSize == 16)
+      return compare_equal_16(p, c);
+  }
+
+  uint64_t compare_less(void* p, char c) {
+    if(kNodeSize == 64)
+      return compare_less_64(p, c);
+    else if(kNodeSize == 32)
+      return compare_less_32(p, c);
+    else if(kNodeSize == 16)
+      return compare_less_16(p, c);
+  }
+
+  uint64_t bitmap() {
+    CONDITION_ERROR(knum_ < 0 || knum_ > kNodeSize, "error knum");
+    if(kNodeSize == 64) {
+      if(knum_ == kNodeSize) { return 0x00ul - 1; }
+      else { return (0x01ul << knum_) - 1; }
+    } else { return (0x01ul << knum_) - 1; }
+  }
+
+  /* 0: equal, minus value: key less than node prefix */
+  int prefix_compare(String& key, bool reliable) {
+    int plen = plen_;
+    uint16_t tag = ptag_.tag;
+    String* pr = (String*) ptag_.ptr;
+
+    // unreliable prefix compare using hashtag
+    if(!reliable && key.len >= plen) {
+      uint16_t ktag = hash(key.str, plen);
+      if(ktag == tag) return 0;
+    }
+
+    // reliable prefix compare or unequal tag
+    int pcmp, cmps = std::min(key.len, plen);
+    if(cmps <= kEmbedPrSize) { // embedded prefix
+      prefetcht0(embed_); // prefetch a cache line
+      pcmp = memcmp(key.str, embed_, cmps);
+    } else if(pr != nullptr && pr->len >= cmps) {
+      // ensure no segmentation fault
+      prefetcht0(pr); // prefetch a cache line
+      pcmp = memcmp(key.str, pr->str, cmps);
+    } // current node has modified by others, retry
+
+    // key.len < plen: can't be equal
+    if(!pcmp && cmps < plen) return -1;
+    return pcmp;
+  }
+
+  int to_next_phase1(String& key, void*& next, bool& to_sibling,
+                     String*& vpr, int& vpl, bool reliable) {
+    int pcmp = prefix_compare(key, reliable);
+
+    if(pcmp < 0) {
+      // key is less than node prefix
+      next = children_[0];
+    } else if(pcmp > 0) {
+      // key is greater than node prefix
+      next = next_;
+      if(control_.has_sibling()) {
+        to_sibling = true;
+      }
+    } else if(!reliable) {
+      // prefix equal determined by unreliable tag
+      vpr = (String*) ptag_.ptr, vpl = plen_;
+    }
+
+    return pcmp;
+  }
+
+  int index_phase1(String& key, void*& next, int& index, bool& to_sibling) {
+    int pcmp = prefix_compare(key, true);
+
+    if(pcmp < 0) {
+      // key is less than node prefix
+      index = 0;
+    } else if(pcmp > 0) {
+      /* key is greater than prefix, meanwhile
+       * current node is the right most node */
+      if(!control_.has_sibling()) index = knum_;
+      else next = next_, to_sibling = true;
+    }
+
+    return pcmp;
+  }
+
+  int suffix_bs(String& key, int cmps, int lid, int hid) {
+    // suffix binary search, cmps: compared size
+    assert(key.len >= cmps && hid > lid);
+    char* kstr = key.str + cmps, * sep;
+    int ks = key.len - cmps, seps;
+    int mid, cmp;
+
+    while(lid < hid) {
+      mid = (lid + hid) / 2;
+      sep = anchors_[mid]->str + cmps;
+      seps = anchors_[mid]->len - cmps;
+
+      if(seps < 0) return mid;
+      // current node has been modified, retry
+
+      cmp = compare(kstr, ks, sep, seps);
+      if(cmp < 0) { hid = mid; }
+      else if(cmp == 0) return mid;
+      else { lid = mid + 1; }
+    }
+
+    assert(lid == hid);
+    return hid;
+  }
+
+  void memmove64(void* src, void* dst, int n, bool forward) {
+    CONDITION_ERROR(n < 0 || n > kNodeSize, "memmove64 error");
+    assert(aligned(src, 8) && aligned(dst, 8));
+    if(forward) {
+      for(int idx = 0; idx < n; idx++)
+        ((uint64_t*) dst)[idx] = ((uint64_t*) src)[idx];
+    } else {
+      for(int idx = n - 1; idx > -1; idx--)
+        ((uint64_t*) dst)[idx] = ((uint64_t*) src)[idx];
+    }
+  }
+
+  void content_rebuild() {
+    /* all keys are sorted, the node prefix is equal to the longest
+     * common prefix of the first and the last key; new node: prefix
+     * init, index == 0; normal node (whose next_ pointer points to
+     * sibling): prefix adjust, index == 0 (index == knum - 1 can never
+     * happen); right most node: prefix adjust index == 0 | knum - 1 */
+    int fs = anchors_[0]->len, ls = anchors_[knum_ - 1]->len;
+    char* fk = anchors_[0]->str, * lk = anchors_[knum_ - 1]->str;
+    plen_ = common_prefix(fk, fs, lk, ls);
+    if(plen_ <= kEmbedPrSize) { memcpy(embed_, fk, plen_); }
+    uint16_t tag = hash(fk, plen_);
+    ptag_.tag = tag, ptag_.ptr = (uint64_t) anchors_[0];
+
+    for(int kid = 0; kid < knum_; kid++) {
+      for(int fid = 0; fid < kFeatureSize; fid++) {
+        char ft = (plen_ + fid) < anchors_[kid]->len ?
+                  anchors_[kid]->str[plen_ + fid] : 0;
+        features_[fid][kid] = ft + 128;// byte encoding conversion
+      }
+    }
+  }
+
+  void* split(String*& key, void* lchild, void* rchild, int index) {
+    void* src, * dst;
+    InnerNode* rnode = (InnerNode*) malloc(sizeof(InnerNode));
+    new(rnode) InnerNode();
+    rnode->next_ = next_, next_ = rnode;
+    /* set corresponding variables before setting flag */
+    if(!control_.has_sibling()) control_.set_sibling();
+    else rnode->control_.set_sibling();
+
+    if(index == kNodeSize) { // index == kNodeSize can only exist in the rightmost node
+      // the rightmost node without sibling and key is greater than all keys
+      rnode->anchors_[0] = key;
+      rnode->children_[0] = lchild;
+      rnode->next_ = rchild;
+      rnode->knum_ = 1;
+
+      rnode->content_rebuild();
+      key = anchors_[kNodeSize - 1];
+    } else if(index < kNodeSize / 2) {
+      // move right half separators and children to right node
+      src = anchors_ + kNodeSize / 2, dst = rnode->anchors_;
+      memmove64(src, dst, kNodeSize / 2, true);
+      src = children_ + kNodeSize / 2, dst = rnode->children_;
+      memmove64(src, dst, kNodeSize / 2, true);
+
+      //insert lhigh to left inner node
+      src = anchors_ + index, dst = anchors_ + index + 1;
+      memmove64(src, dst, kNodeSize / 2 - index, false);
+      src = children_ + index, dst = children_ + index + 1;
+      memmove64(src, dst, kNodeSize / 2 - index, false);
+      anchors_[index] = key;
+      children_[index + 1] = rchild;
+
+      knum_ = kNodeSize / 2 + 1;
+      rnode->knum_ = kNodeSize / 2;
+
+      content_rebuild();
+      rnode->content_rebuild();
+
+      key = anchors_[kNodeSize / 2];
+    } else { // kNodeSize / 2 <= index < kNodeSize
+      int ncp = index - kNodeSize / 2;
+      src = anchors_ + kNodeSize / 2, dst = rnode->anchors_;
+      memmove64(src, dst, ncp, true);
+      src = anchors_ + index, dst = rnode->anchors_ + ncp + 1;
+      memmove64(src, dst, kNodeSize - index, true);
+      rnode->anchors_[index - kNodeSize / 2] = key;
+
+      src = children_ + kNodeSize / 2, dst = rnode->children_;
+      memmove64(src, dst, ncp + 1, true);
+      src = children_ + index + 1, dst = rnode->children_ + ncp + 2;
+      memmove64(src, dst, kNodeSize - index - 1, true);
+      rnode->children_[index - kNodeSize / 2 + 1] = rchild;
+
+      knum_ = kNodeSize / 2;
+      rnode->knum_ = kNodeSize / 2 + 1;
+
+      content_rebuild();
+      rnode->content_rebuild();
+
+      key = anchors_[kNodeSize / 2 - 1];
+    }
+
+    return rnode;
+  }
+
+  void* merge(String*& key) {
+    // only merge with the right sibling node
+    void* merged = nullptr;
+    if(control_.has_sibling()) {
+      InnerNode* rnode = (InnerNode*) next_;
+      int rnkey = rnode->knum_;
+      CONDITION_ERROR(knum_ < 1, "knum equals 1 at least");
+      if(knum_ + rnkey <= kMergeSize || rnkey == 0) { // try to merge
+        rnode->control_.latch_exclusive();
+        rnkey = rnode->knum_;
+        // if rnkey = 0 (rightmost inner), merge immediately
+        // ensure need to merge with right node
+        if(knum_ + rnkey <= kMergeSize || rnkey == 0) {
+          merged = rnode, key = anchors_[knum_ - 1];
+
+          // move right node separator to current node
+          void* src = rnode->anchors_;
+          void* dst = anchors_ + knum_;
+          memmove64(src, dst, rnkey, true);
+          src = rnode->children_;
+          dst = children_ + knum_;
+          memmove64(src, dst, rnkey, true);
+          knum_ += rnkey, rnode->knum_ = 0;
+
+          content_rebuild();
+          next_ = rnode->next_, rnode->next_ = this;
+          if(!rnode->control_.has_sibling()) {
+            control_.clear_sibling();
+          }
+          rnode->control_.set_delete();
+          rnode->control_.update_version();
+        }
+        rnode->control_.unlatch_exclusive();
+      }
+    }
+
+    return merged;
+  }
+
+  void* bound_remove(String*& key, bool& up, int index) {
+    CONDITION_ERROR(up != false, "up is uninitialized");
+    void* merged = nullptr;
+    if(!control_.has_sibling()) {
+      // current node is the right-most node
+      next_ = children_[index];
+      knum_ -= 1;
+      if(knum_ == 0) plen_ = 0;
+      else content_rebuild();
+    } else {
+      InnerNode* rnode = (InnerNode*) next_;
+      rnode->control_.latch_exclusive();
+      rnode->control_.update_version();
+      int rnkey = rnode->knum_;
+
+      // if current has no key after border remove, or if sibling has no key (rightmost
+      // node) or has only one key, or if the number of keys in current and sibling after
+      // border remove is less than or equal to kMergeSize, merge the two node
+      if(index + rnkey <= kMergeSize || index == 0
+         || rnkey == 0 || rnkey == 1) {
+        merged = rnode; // border remove, so do not need to reset mid.
+        // move right node key to current node
+        void* src = rnode->anchors_;
+        void* dst = anchors_ + index;
+        memmove64(src, dst, rnkey, true);
+        src = rnode->children_ + 1;
+        dst = children_ + knum_;
+        memmove64(src, dst, rnkey ? rnkey - 1 : 0, true);
+        knum_ += rnkey - 1, rnode->knum_ = 0;
+        content_rebuild();
+
+        // set meta information
+        if(rnkey != 0) next_ = rnode->next_;
+        else next_ = children_[index]; // rightmost node has no key
+        rnode->next_ = this;
+        if(!rnode->control_.has_sibling())
+          control_.clear_sibling();
+        rnode->control_.set_delete();
+      } else {
+        // to ensure other threads execute correctly when border remove happens
+        // move the last one child (the child after merge) to sibling
+        up = true, key = anchors_[index - 1];
+        rnode->children_[0] = children_[index];
+        knum_ -= 1;
+        content_rebuild();
+      }
+
+      rnode->control_.unlatch_exclusive();
+    }
+
+    return merged;
+  }
+
+ public:
+  InnerNode() : control_(false), knum_(0), plen_(0), next_(nullptr) {}
+
+  ~InnerNode() {}
+
+  void* sibling() {
+    if(control_.has_sibling()) { return next_; }
+    return nullptr;
+  }
+
+  void statistic(std::map<std::string, double>& stat) {
+    stat["index size"] += sizeof(InnerNode);
+    stat["inner num"] += 1;
+  }
+
+  func_used void exhibit() {
+    std::vector<std::string> keys;
+    for(int kid = 0; kid < knum_; kid++) {
+      String& key = *anchors_[kid];
+      keys.push_back(std::string(key.str, key.len));
+    }
+    std::cout << "inner node " << this << ", prefix len: " << plen_
+              << ", prefix: " << keys[0].substr(0, plen_) << std::endl;
+
+    for(int kid = 0; kid < knum_; kid++) {
+      std::cout << "  " << kid << ": " << GRAPH_FONT_RED << keys[kid].substr(0, plen_)
+                << GRAPH_FONT_YELLOW << keys[kid].substr(plen_) << GRAPH_ATTR_NONE << std::endl;
+    }
+  }
+
+  bool to_next(String& key, void*& next, uint64_t& version,
+               String*& vpr, int& vpl, bool reliable) {
+    // if next points to a child, return false, else next points to sibling, return true
+    bool to_sibling;
+
+    while(true) { // make sure the procedure of to_next is atomic
+      to_sibling = false; // make sure to_sibling is initialized with false even retry
+      version = control_.begin_read();
+
+      if(control_.deleted()) { // current node has been deleted, jump to its left node
+        to_sibling = true, next = next_;
+        CONDITION_ERROR(next == nullptr, "next can't be null");
+        break;
+      }
+
+      // phase 1: prefix comparison
+      int pcmp = to_next_phase1(key, next, to_sibling, vpr, vpl, reliable);
+
+      if(!pcmp) { // prefix of key is equal to node prefix
+        int idx, rid, plen = plen_; // rid: row index, from higher byte to lower byte
+        if(key.len < plen) continue; // current node has modified by other threads
+
+        uint64_t mask, eqmask = bitmap();
+        int cmps = std::min(kFeatureSize, key.len - plen); // feature compare bound
+
+        for(rid = 0; rid < cmps; rid++) { // equal comparison
+          mask = compare_equal(features_[rid], key.str[plen + rid] + 128);
+          mask = mask & eqmask;
+          if(mask == 0) break;
+          eqmask = mask;
+        }
+
+        if(rid < cmps) { // less comparison
+          mask = compare_less(features_[rid], key.str[plen + rid] + 128);
+          mask = mask & eqmask;
+
+          // less than features corresponding to eqmask
+          if(mask == 0) {
+            if(eqmask == 0) { idx = 0; }// the right most node, all separators
+              // have been deleted, but hasn't been merged to its left sibling
+            else { idx = index_least1(eqmask); }
+          } else { idx = kBitCnt - countl_zero(mask); }
+        } else {
+          // can't determine jump to which child just using features
+          assert(eqmask != 0);
+          int hid = kBitCnt - countl_zero(eqmask);
+          int lid = index_least1(eqmask);
+          idx = suffix_bs(key, plen + cmps, lid, hid);
+        }
+
+        if(idx == knum_) {
+          next = next_; // key is greater than all separators
+          if(control_.has_sibling()) to_sibling = true;
+        } else {
+          next = children_[idx];
+        }
+      }
+
+      if(control_.end_read(version)) break;
+    }
+
+    return to_sibling;
+  }
+
+  bool index_or_sibling(String& key, void*& next, int& index) {
+    // move to sibling, return false; index key, return true;
+    bool to_sibling = false;
+
+    if(control_.deleted()) { // current node has been deleted, jump to its left node
+      next = next_;
+      CONDITION_ERROR(next == nullptr, "next can't be null");
+      return true;
+    }
+
+    // phase 1: prefix comparison
+    int pcmp = index_phase1(key, next, index, to_sibling);
+
+    if(!pcmp) { // prefix of key is equal to node prefix
+      int rid, cmps, plen = plen_;
+      uint64_t mask, eqmask = bitmap();
+      cmps = std::min(kFeatureSize, key.len - plen_);
+
+      for(rid = 0; rid < cmps; rid++) {
+        mask = compare_equal(features_[rid], key.str[plen + rid] + 128);
+        mask = mask & eqmask;
+        if(mask == 0) break;
+        eqmask = mask;
+      }
+
+      if(rid < cmps) { // less comparison
+        mask = compare_less(features_[rid], key.str[plen + rid] + 128);
+        mask = mask & eqmask;
+
+        // less than features corresponding to eqmask
+        if(mask == 0) {
+          if(eqmask == 0) { index = 0; }//new node,or the right most node, all separators
+            //have been deleted, but hasn't been merged to its left sibling
+          else { index = index_least1(eqmask); }
+        } else { index = kBitCnt - countl_zero(mask); }
+      } else {
+        // can't determine jump to which child just using features
+        assert(eqmask != 0);
+        int hid = kBitCnt - countl_zero(eqmask);
+        int lid = index_least1(eqmask);
+        index = suffix_bs(key, plen + cmps, lid, hid);
+      }
+
+      if(index == knum_ && control_.has_sibling()) {
+        // greater than all keys, meanwhile current node is not the rightmost node
+        next = next_, to_sibling = true;
+        assert(next != nullptr);
+      }
+    }
+
+    return to_sibling;
+  }
+
+  void* insert(String*& key, void* lchild, void* rchild, int index) {
+    CONDITION_ERROR(key == nullptr, "key can't be nullptr");
+    CONDITION_ERROR(lchild == nullptr, "lchild can't be nullptr");
+    CONDITION_ERROR(rchild == nullptr, "rchild can't be nullptr");
+    CONDITION_ERROR(index < 0 || index > knum_, "invalid index");
+
+    control_.update_version();
+
+    if(knum_ < kNodeSize) {  // safe, insert key into current node
+      void* src = anchors_ + index;
+      void* dst = anchors_ + index + 1;
+      memmove64(src, dst, knum_ - index, false);
+      anchors_[index] = key;
+
+      if(index != knum_) { // new node or rightmost node
+        src = children_ + index + 1;
+        dst = children_ + index + 2;
+        memmove64(src, dst, knum_ - index - 1, false);
+        children_[index + 1] = rchild;
+      } else { children_[index] = lchild, next_ = rchild; }
+
+      knum_ += 1;
+      if(index == 0 || index == knum_ - 1) {
+        content_rebuild();
+      } else {
+        for(int rid = 0; rid < kFeatureSize; rid++) {
+          src = features_[rid] + index;
+          dst = features_[rid] + index + 1;
+          memmove(dst, src, knum_ - index - 1);
+          char ft = (plen_ + rid) < key->len ?
+                    key->str[plen_ + rid] : 0;
+          features_[rid][index] = ft + 128; // byte encoding conversion
+        }
+      }
+
+      return nullptr;
+    } else { // unsafe, split the node
+      return split(key, lchild, rchild, index);
+    }
+  }
+
+  void* remove(String*& key, bool& up, int index) {
+    CONDITION_ERROR(key == nullptr, "key can't be null");
+    CONDITION_ERROR(index < 0 || index >= knum_, "invalid index");
+    control_.update_version(), up = false;
+
+    if(index < knum_ - 1) {
+      // knum is 2 at least, the merged node is in current node
+      CONDITION_ERROR(knum_ < 2, "knum equals 2 at least");
+      void* src = anchors_ + index + 1;
+      void* dst = anchors_ + index;
+      memmove64(src, dst, knum_ - index - 1, true);
+      if(index == 0) content_rebuild();
+
+      src = children_ + index + 2;
+      dst = children_ + index + 1;
+      memmove64(src, dst, knum_ - index - 2, true);
+
+      knum_ -= 1; // knum >= 1
+      return merge(key);
+    }
+
+    // index == knum -1
+    CONDITION_ERROR(index != knum_ - 1, "remove error");
+    return bound_remove(key, up, index);
+  }
+
+  bool anchor_update(String* key, int index) {
+    CONDITION_ERROR(index < 0 || index >= knum_, "anchor update error");
+    control_.update_version();
+
+    anchors_[index] = key;
+    if(index == 0 || index == knum_ - 1) {
+      content_rebuild();
+    } else {
+      for(int rid = 0; rid < kFeatureSize; rid++) {
+        char ft = (plen_ + rid) < key->len ?
+                  key->str[plen_ + rid] : 0;
+        features_[rid][index] = ft + 128;
+      }
+    }
 
     return control_.has_sibling() && (knum_ - 1) == index;
   }

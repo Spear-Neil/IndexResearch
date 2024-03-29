@@ -1,10 +1,16 @@
 #ifndef INDEXRESEARCH_COMPARE_H
 #define INDEXRESEARCH_COMPARE_H
 
-#include "simd.h"
 #include "config.h"
+#include "simd.h"
 
-using namespace util;
+using util::cmpeq_int8_simd128;
+using util::cmpeq_int8_simd256;
+using util::cmpeq_int8_simd512;
+
+using util::cmplt_int8_simd128;
+using util::cmplt_int8_simd256;
+using util::cmplt_int8_simd512;
 
 namespace FeatureBTree {
 

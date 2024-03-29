@@ -76,9 +76,9 @@ bool splay_check(const Tree* t,
         !splay_check(t->right, tmin, out_tmax, cmp))
         return false;
 
-    if (tmax && !cmp(tmax->key, t->key))
+    if (tmax && !cmp(tmax->str, t->str))
         return false;
-    if (tmin && !cmp(t->key, tmin->key))
+    if (tmin && !cmp(t->str, tmin->str))
         return false;
     return true;
 }
@@ -101,10 +101,10 @@ Tree * splay(const Key& k, Tree* t, const Compare& cmp) {
     if (t == nullptr) return t;
 
     for ( ; ; ) {
-        if (cmp(k, t->key)) {
+        if (cmp(k, t->str)) {
             if (t->left == nullptr) break;
 
-            if (cmp(k, t->left->key)) {
+            if (cmp(k, t->left->str)) {
                 // rotate right
                 Tree* y = t->left;
                 t->left = y->right;
@@ -117,10 +117,10 @@ Tree * splay(const Key& k, Tree* t, const Compare& cmp) {
             r = t;
             t = t->left;
         }
-        else if (cmp(t->key, k)) {
+        else if (cmp(t->str, k)) {
             if (t->right == nullptr) break;
 
-            if (cmp(t->right->key, k)) {
+            if (cmp(t->right->str, k)) {
                 // rotate left
                 Tree* y = t->right;
                 t->right = y->left;
@@ -157,7 +157,7 @@ Tree * splay_insert(Tree* nn, Tree* t, const Compare& cmp) {
     if (t == nullptr) {
         nn->left = nn->right = nullptr;
     }
-    else if (cmp(nn->key, t->key)) {
+    else if (cmp(nn->str, t->str)) {
         nn->left = t->left;
         nn->right = t;
         t->left = nullptr;
@@ -177,7 +177,7 @@ Tree * splay_erase(const Key& k, Tree*& t, const Compare& cmp) {
     if (t == nullptr) return nullptr;
     t = splay(k, t, cmp);
     // k == t->key ?
-    if (!cmp(k, t->key) && !cmp(t->key, k)) {
+    if (!cmp(k, t->str) && !cmp(t->str, k)) {
         // found it
         Tree* r = t;
         if (t->left == nullptr) {

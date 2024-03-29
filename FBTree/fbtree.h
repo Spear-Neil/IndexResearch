@@ -13,6 +13,9 @@
 #include "type.h"
 #include "epoch.h"
 
+using util::Epoch;
+using util::EpochGuard;
+
 namespace FeatureBTree {
 
 template<typename K, typename V>
@@ -344,7 +347,7 @@ class alignas(64) FBTree {
       if(work != root_) unlatch_exclusive(current);
 
       if(merged) merged = inner(work)->remove(mid, up, index);
-      else up = inner(work)->border_update(mid, index);
+      else up = inner(work)->anchor_update(mid, index);
 
       if(work == root_) { // work has been latched
         merged = nullptr, up = false;
@@ -393,7 +396,9 @@ class alignas(64) FBTree {
   KVPair* update(K key, V value) {
     void* kv = malloc(sizeof(KVPair));
     new(kv) KVPair{key, value};
-    return update((KVPair*) kv);
+    KVPair* ret = update((KVPair*) kv);
+    if(ret == nullptr) free(kv);
+    return ret;
   }
 
   KVPair* lookup(K key) {
@@ -437,6 +442,438 @@ class alignas(64) FBTree {
   iterator upper_bound(K key) {
     return bound(key, true);
   }
+};
+
+template<typename V>
+class alignas(64) FBTree<String, V> {
+  typedef FeatureBTree::LeafNode<String, V> LeafNode;
+  typedef FeatureBTree::InnerNode<String> InnerNode;
+  static constexpr int kMaxHeight = 13;
+  static constexpr int kBufSize = 256 - sizeof(String);
+
+  void* root_;                  // root node
+  int tree_depth_;              // tree depth/height
+  Epoch* epoch_;                // epoch-based memory reclaimer
+  void* root_track_[kMaxHeight];// track the root node
+
+ public:
+  typedef FeatureBTree::KVPair<String, V> KVPair;
+
+  class alignas(32) iterator {
+    LeafNode* node_;   // the leaf node pointed by current iterator
+    uint64_t version_; // the version of leaf node at the last access
+    KVPair* kv_;       // the kv pointed by current iterator, null means the end
+    int pos_;          // the ordinal of kv in current node (ordered view)
+
+   public:
+
+  };
+
+ private:
+  Control* control(void* node) { return (Control*) node; }
+
+  InnerNode* inner(void* node) { return (InnerNode*) node; }
+
+  LeafNode* leaf(void* node) { return (LeafNode*) node; }
+
+  bool is_leaf(void* node) { return control(node)->is_leaf(); }
+
+  void latch_exclusive(void* node) { control(node)->latch_exclusive(); }
+
+  void unlatch_exclusive(void* node) { control(node)->unlatch_exclusive(); }
+
+  void node_prefetch(void* node) {
+    if(Config::kNodePrefetch) {
+      for(int i = 0; i < Config::kPrefetchSize; i++)
+        prefetcht0((char*) node + i * 64);
+    }
+  }
+
+  bool prefix_verification(String& key, String& pr, int len) {
+    CONDITION_ERROR(key.len < len || pr.len < len, "prefix verification error");
+    return !compare(key.str, len, pr.str, len); // return true, if equal
+  }
+
+ public:
+  FBTree() {
+    root_ = malloc(sizeof(LeafNode));
+    new(root_) LeafNode();
+    tree_depth_ = 1;
+    root_track_[0] = root_;
+    epoch_ = new Epoch();
+  }
+
+  //By default, kv is destruct and then the memory block of kv is freed
+  ~FBTree() { // recursive destructor result in stackoverflow
+    for(int rid = 0; rid < tree_depth_; rid++) {
+      void* node = root_track_[rid], * sibling;
+      while(node) {
+        if(is_leaf(node)) {
+          leaf(node)->~LeafNode();
+          sibling = leaf(node)->sibling();
+        } else {
+          inner(node)->~InnerNode();
+          sibling = inner(node)->sibling();
+        }
+        free(node);
+        node = sibling;
+      }
+    }
+    delete epoch_;
+  }
+
+  void node_parameter() { Constant<String>::node_parameter(); }
+
+  void statistics() {
+    std::map<std::string, double> stat;
+    stat["index depth"] = tree_depth_;
+    for(int rid = 0; rid < tree_depth_; rid++) {
+      void* node = root_track_[rid];
+      while(node) {
+        if(is_leaf(node)) {
+          leaf(node)->statistic(stat);
+          node = leaf(node)->sibling();
+        } else {
+          inner(node)->statistic(stat);
+          node = inner(node)->sibling();
+        }
+      }
+    }
+    stat["load factor"] = stat["kv pair num"] / (stat["leaf num"] * Constant<String>::kNodeSize);
+
+    std::cout << "-- FBTree statistics" << std::endl;
+    for(auto item : stat) {
+      if(item.first == "index size") {
+        size_t GB = 1024ul * 1024 * 1024;
+        std::cout << "  -- " << item.first << ": " << item.second / GB << " GB" << std::endl;
+      } else {
+        std::cout << "  -- " << item.first << ": " << item.second << std::endl;
+      }
+    }
+  }
+
+  Epoch& get_epoch() { return *epoch_; }
+
+  // kv should be allocated by malloc
+  KVPair* upsert(KVPair* kv) {
+    assert(epoch_->guarded());
+    bool reliable = false;
+
+    restart:
+    std::vector<void*> path_stack;
+    path_stack.reserve(tree_depth_);
+
+    //traverse the btree to leaf node, save path to path stack
+    void* work, * current = root_;
+    Control* parent = control(current); // the parent of leaf nodes
+    uint64_t version = 0; // version of leaf node's parent; init with zero,
+    // so an extreme case can perform correctly (no inner node here initially);
+    // used to determine whether we need to move to sibling in leaf node
+
+    String* vpr = nullptr; // pointer of verification prefix, if using unreliable comparison
+    int vpl = 0; // length of verification prefix, if using unreliable comparison
+
+    while(!is_leaf(current)) {
+      work = current, parent = control(current);
+      if(!inner(work)->to_next(kv->key, current, version, vpr, vpl, reliable)) {
+        path_stack.push_back(work);
+      } // move to a child or a sibling
+      node_prefetch(current);
+    }
+
+    // verify whether our result is reliable
+    if(!reliable && vpr != nullptr) {
+      bool credible = prefix_verification(kv->key, *vpr, vpl);
+      if(!credible) {
+        reliable = true;
+        goto restart;
+      }
+    }
+
+    // reach leaf node
+    latch_exclusive(current);
+    while(leaf(current)->to_sibling(kv->key, work, parent, version)) {
+      assert(work != nullptr);
+      latch_exclusive(work);
+      unlatch_exclusive(current);
+      current = work;
+    }
+
+    int index, rootid = 0;// rootid: reverse traversal index
+    void* rnode, * next;  // rnode: the new node
+    String* mid = nullptr;
+    KVPair* old = leaf(current)->upsert(kv, rnode, mid);
+
+    while(rnode != nullptr) { // correctly insert the key to leaf node, splitting
+      rootid += 1; // to upper level
+      if(current == root_) {
+        //root node need splitting
+        work = malloc(sizeof(InnerNode));
+        new(work) InnerNode();
+      } else if(!path_stack.empty()) {
+        work = path_stack.back();
+        path_stack.pop_back();
+      } else {// track to the new level
+        work = root_track_[rootid];
+        assert(work != nullptr);
+      }
+
+      /* set root after it has been latched, otherwise some
+       * thread may read root node before it has been set */
+      // make the three nodes one logical entity, so no other
+      // threads can modify the global var, root, tree_depth
+      latch_exclusive(work);
+      if(current == root_) {
+        root_track_[rootid] = work;
+        root_ = work, tree_depth_++;
+      }
+
+      while(inner(work)->index_or_sibling(*mid, next, index)) {
+        assert(next != nullptr);
+        latch_exclusive(next);
+        unlatch_exclusive(work);
+        work = next;
+      }
+      unlatch_exclusive(current);
+
+      // inner node insertion
+      rnode = inner(work)->insert(mid, current, rnode, index);
+      if(rootid == 1) { control(current)->end_splitting(); }
+      current = work;
+    }
+
+    unlatch_exclusive(current);
+    return old;
+  }
+
+  // kv should be allocated by malloc
+  KVPair* upsert(char* key, int len, V value) {
+    KVPair* kv = (KVPair*) malloc(sizeof(KVPair) + len);
+    kv->value = value, kv->key.len = len;
+    memcpy(kv->key.str, key, len);
+    return upsert(kv);
+  }
+
+  KVPair* remove(String& key) {
+    assert(epoch_->guarded());
+    bool reliable = false;
+
+    restart:
+    std::vector<void*> path_stack;
+    path_stack.reserve(tree_depth_);
+
+    //traverse the btree to leaf node, save path to path stack
+    void* work, * current = root_;
+    Control* parent = control(current); // the parent of leaf nodes
+    uint64_t version = 0; // version of leaf node's parent; init with zero,
+    // so an extreme case can perform correctly (no inner node here initially);
+    // used to determine whether we need to move to sibling in leaf node
+
+    String* vpr = nullptr; // pointer of verification prefix, if using unreliable comparison
+    int vpl = 0; // length of verification prefix, if using unreliable comparison
+
+    while(!is_leaf(current)) {
+      work = current, parent = control(current);
+      if(!inner(work)->to_next(key, current, version, vpr, vpl, reliable)) {
+        path_stack.push_back(work);
+      } // move to a child or a sibling
+      node_prefetch(current);
+    }
+
+    // verify whether our result is reliable
+    if(!reliable && vpr != nullptr) {
+      bool credible = prefix_verification(key, *vpr, vpl);
+      if(!credible) {
+        reliable = true;
+        goto restart;
+      }
+    }
+
+    // reach leaf node
+    latch_exclusive(current);
+    while(leaf(current)->to_sibling(key, work, parent, version)) {
+      assert(work != nullptr);
+      latch_exclusive(work);
+      unlatch_exclusive(current);
+      current = work;
+    }
+
+    int index, rootid;
+    void* merged, * next;
+    String* mid;
+    KVPair* kv = leaf(current)->remove(key, merged, mid);
+    if(merged) epoch_->retire(mid); // anchor keys are only store in leaf nodes
+
+    bool up = false; // need to update upper level key
+    while(merged || up) {
+      epoch_->retire(merged);
+      rootid += 1;
+
+      if(!path_stack.empty()) {
+        work = path_stack.back();
+        path_stack.pop_back();
+      } else {
+        work = root_track_[rootid];
+      }
+      assert(work != nullptr);
+
+      latch_exclusive(work);
+      while(inner(work)->index_or_sibling(*mid, next, index)) {
+        assert(next != nullptr);
+        latch_exclusive(next);
+        unlatch_exclusive(work);
+        work = next;
+      }
+      if(work != root_) unlatch_exclusive(current);
+
+      if(merged) merged = inner(work)->remove(mid, up, index);
+      else up = inner(work)->anchor_update(mid, index);
+
+      if(work == root_) { // work has been latched
+        merged = nullptr, up = false;
+        next = inner(work)->root_remove();
+        if(next) {
+          root_ = next, tree_depth_--;
+          epoch_->retire(work);
+          assert(next == current);
+        }
+        // ensure root is latched when setting global root, tree_depth,
+        // makes the three node one logical entity (old root, the merged
+        // node, new root(current)), so no other threads can modify global var
+        unlatch_exclusive(current);
+      }
+
+      current = work;
+    }
+
+    unlatch_exclusive(current);
+    return kv;
+  }
+
+  KVPair* remove(char* key, int len) {
+    char buf[kBufSize + sizeof(String)];
+    String* str;
+
+    if(len <= kBufSize) str = (String*) buf;
+    else str = (String*) malloc(sizeof(String) + len);
+
+    str->len = len;
+    memcpy(str->str, key, len);
+    KVPair* kv = remove(*str);
+
+    if(len > kBufSize) free(str);
+
+    return kv;
+  }
+
+  // kv should be allocated by malloc
+  KVPair* update(KVPair* kv) {
+    assert(epoch_->guarded());
+    bool reliable = false;
+
+    restart:
+    void* node = root_;
+    Control* parent = control(node);
+    uint64_t pversion = 0;
+
+    String* vpr = nullptr;
+    int vpl = 0;
+
+    while(!is_leaf(node)) {
+      parent = control(node);
+      inner(node)->to_next(kv->key, node, pversion, vpr, vpl, reliable);
+      node_prefetch(node);
+    }
+
+    uint64_t version;
+    KVPair* old;
+    do {
+      version = control(node)->begin_read();
+      while(leaf(node)->to_sibling(kv->key, node, parent, pversion)) {
+        version = control(node)->begin_read();
+      }
+      old = leaf(node)->update(kv);
+      if(old != nullptr) return old; // update succeeded
+    } while(!control(node)->end_read(version));
+
+    // not found, verify whether our result is reliable
+    if(!reliable && vpr != nullptr) {
+      bool credible = prefix_verification(kv->key, *vpr, vpl);
+      if(!credible) {
+        reliable = true;
+        goto restart;
+      }
+    }
+
+    return nullptr;
+  }
+
+  KVPair* update(char* key, int len, V value) {
+    KVPair* kv = (KVPair*) malloc(sizeof(KVPair) + len);
+    kv->value = value, kv->key.len = len;
+    memcpy(kv->key.str, key, len);
+    KVPair* ret = update(kv);
+    if(ret == nullptr) free(kv);
+    return ret;
+  }
+
+  KVPair* lookup(String& key) {
+    assert(epoch_->guarded());
+    bool reliable = false;
+
+    restart:
+    void* node = root_;
+    Control* parent = control(node);
+    uint64_t pversion = 0;
+
+    String* vpr = nullptr;
+    int vpl = 0;
+
+    while(!is_leaf(node)) {
+      parent = control(node);
+      inner(node)->to_next(key, node, pversion, vpr, vpl, reliable);
+      node_prefetch(node);
+    }
+
+    uint64_t version;
+    KVPair* kv;
+    do {
+      version = control(node)->begin_read();
+      while(leaf(node)->to_sibling(key, node, parent, pversion)) {
+        version = control(node)->begin_read();
+      }
+      kv = leaf(node)->lookup(key);
+      if(kv != nullptr) return kv; // find it
+    } while(!control(node)->end_read(version));
+
+    // not found, verify whether our result is reliable
+    if(!reliable && vpr != nullptr) {
+      bool credible = prefix_verification(kv->key, *vpr, vpl);
+      if(!credible) {
+        reliable = true;
+        goto restart;
+      }
+    }
+
+    return nullptr;
+  }
+
+  KVPair* lookup(char* key, int len) {
+    char buf[kBufSize + sizeof(String)];
+    String* str;
+
+    if(len <= kBufSize) str = (String*) buf;
+    else str = (String*) malloc(sizeof(String) + len);
+
+    str->len = len;
+    memcpy(str->str, key, len);
+    KVPair* kv = lookup(*str);
+
+    if(len > kBufSize) free(str);
+
+    return kv;
+  }
+
 };
 
 }
