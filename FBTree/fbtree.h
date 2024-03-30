@@ -739,19 +739,13 @@ class alignas(64) FBTree<String, V> {
   // kv should be allocated by malloc
   KVPair* update(KVPair* kv) {
     assert(epoch_->guarded());
-    bool reliable = false;
-
-    restart:
     void* node = root_;
     Control* parent = control(node);
     uint64_t pversion = 0;
 
-    String* vpr = nullptr; // pointer of verification prefix, if using unreliable comparison
-    int vpl = 0; // length of verification prefix, if using unreliable comparison
-
     while(!is_leaf(node)) {
       parent = control(node);
-      inner(node)->to_next(kv->key, node, pversion, vpr, vpl, reliable);
+      inner(node)->to_next(kv->key, node, pversion);
       node_prefetch(node);
     }
 
@@ -765,15 +759,6 @@ class alignas(64) FBTree<String, V> {
       old = leaf(node)->update(kv);
       if(old != nullptr) return old; // update succeeded
     } while(!control(node)->end_read(version));
-
-    // not found, verify whether our result is reliable
-    if(!reliable && vpr != nullptr) {
-      bool credible = prefix_verification(kv->key, *vpr, vpl);
-      if(!credible) {
-        reliable = true;
-        goto restart;
-      }
-    }
 
     return nullptr;
   }
@@ -789,19 +774,13 @@ class alignas(64) FBTree<String, V> {
 
   KVPair* lookup(String& key) {
     assert(epoch_->guarded());
-    bool reliable = false;
-
-    restart:
     void* node = root_;
     Control* parent = control(node);
     uint64_t pversion = 0;
 
-    String* vpr = nullptr; // pointer of verification prefix, if using unreliable comparison
-    int vpl = 0; // length of verification prefix, if using unreliable comparison
-
     while(!is_leaf(node)) {
       parent = control(node);
-      inner(node)->to_next(key, node, pversion, vpr, vpl, reliable);
+      inner(node)->to_next(key, node, pversion);
       node_prefetch(node);
     }
 
@@ -815,15 +794,6 @@ class alignas(64) FBTree<String, V> {
       kv = leaf(node)->lookup(key);
       if(kv != nullptr) return kv; // find it
     } while(!control(node)->end_read(version));
-
-    // not found, verify whether our result is reliable
-    if(!reliable && vpr != nullptr) {
-      bool credible = prefix_verification(kv->key, *vpr, vpl);
-      if(!credible) {
-        reliable = true;
-        goto restart;
-      }
-    }
 
     return nullptr;
   }

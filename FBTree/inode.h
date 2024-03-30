@@ -618,20 +618,14 @@ class alignas(Config::kAlignSize) InnerNode<String> {
    * 1536 - 32 - 4 * 64 - 8 * 64 - 8 * 64 = 224, feature size: 4, node size: 64
    * 896 - 32 - 4 * 32 - 8 * 32 - 8 * 32 = 224, feature size: 4, node size: 32 */
 
-  struct PrTag {
-    uint16_t tag: 16; // hashtag of prefix
-    uint64_t ptr: 48; // points to first key
-  }; // assumption: 64-bit machine
-  static_assert(sizeof(PrTag) == 8 && sizeof(void*) == 8);
-
   Control control_; // synchronization, memory/compiler order
-  int knum_;        // the number of keys
-  int plen_;        // the length of prefix
-  PrTag ptag_;      // prefix and its tag
-  void* next_;      // sibling or last child
+  int knum_;        // the number of anchor/separator keys
+  int plen_;        // the length of prefix, embed if possible
+  String* huge_;    // prefix can't be embedded, points to first anchor
+  void* next_;      // sibling or last child (right-most node)
 
   char features_[kFeatureSize][kNodeSize];
-  char embed_[kEmbedPrSize];   // embedded prefix
+  char tiny_[kEmbedPrSize];    // prefix that can be embedded
   String* anchors_[kNodeSize]; // anchor keys, just pointers
   void* children_[kNodeSize];  // child nodes
 
@@ -663,26 +657,16 @@ class alignas(Config::kAlignSize) InnerNode<String> {
   }
 
   /* 0: equal, minus value: key less than node prefix */
-  int prefix_compare(String& key, bool reliable) {
-    int plen = plen_;
-    uint16_t tag = ptag_.tag;
-    String* pr = (String*) ptag_.ptr;
+  int prefix_compare(String& key) {
+    int plen = plen_, pcmp;
+    int cmps = std::min(key.len, plen);
 
-    // unreliable prefix compare using hashtag
-    if(!reliable && key.len >= plen) {
-      uint16_t ktag = hash(key.str, plen);
-      if(ktag == tag) return 0;
-    }
-
-    // reliable prefix compare or unequal tag
-    int pcmp, cmps = std::min(key.len, plen);
     if(cmps <= kEmbedPrSize) { // embedded prefix
-      prefetcht0(embed_); // prefetch a cache line
-      pcmp = memcmp(key.str, embed_, cmps);
-    } else if(pr != nullptr && pr->len >= cmps) {
+      prefetcht0(tiny_); // prefetch a cache line
+      pcmp = memcmp(key.str, tiny_, cmps);
+    } else if(huge_ != nullptr && huge_->len >= cmps) {
       // ensure no segmentation fault
-      prefetcht0(pr); // prefetch a cache line
-      pcmp = memcmp(key.str, pr->str, cmps);
+      pcmp = memcmp(key.str, huge_->str, cmps);
     } // current node has modified by others, retry
 
     // key.len < plen: can't be equal
@@ -690,9 +674,8 @@ class alignas(Config::kAlignSize) InnerNode<String> {
     return pcmp;
   }
 
-  int to_next_phase1(String& key, void*& next, bool& to_sibling,
-                     String*& vpr, int& vpl, bool reliable) {
-    int pcmp = prefix_compare(key, reliable);
+  int to_next_phase1(String& key, void*& next, bool& to_sibling) {
+    int pcmp = prefix_compare(key);
 
     if(pcmp < 0) {
       // key is less than node prefix
@@ -703,16 +686,13 @@ class alignas(Config::kAlignSize) InnerNode<String> {
       if(control_.has_sibling()) {
         to_sibling = true;
       }
-    } else if(!reliable) {
-      // prefix equal determined by unreliable tag
-      vpr = (String*) ptag_.ptr, vpl = plen_;
     }
 
     return pcmp;
   }
 
   int index_phase1(String& key, void*& next, int& index, bool& to_sibling) {
-    int pcmp = prefix_compare(key, true);
+    int pcmp = prefix_compare(key);
 
     if(pcmp < 0) {
       // key is less than node prefix
@@ -772,10 +752,8 @@ class alignas(Config::kAlignSize) InnerNode<String> {
      * happen); right most node: prefix adjust index == 0 | knum - 1 */
     int fs = anchors_[0]->len, ls = anchors_[knum_ - 1]->len;
     char* fk = anchors_[0]->str, * lk = anchors_[knum_ - 1]->str;
-    plen_ = common_prefix(fk, fs, lk, ls);
-    if(plen_ <= kEmbedPrSize) { memcpy(embed_, fk, plen_); }
-    uint16_t tag = hash(fk, plen_);
-    ptag_.tag = tag, ptag_.ptr = (uint64_t) anchors_[0];
+    plen_ = common_prefix(fk, fs, lk, ls), huge_ = anchors_[0];
+    if(plen_ <= kEmbedPrSize) { memcpy(tiny_, fk, plen_); }
 
     for(int kid = 0; kid < knum_; kid++) {
       for(int fid = 0; fid < kFeatureSize; fid++) {
@@ -977,13 +955,6 @@ class alignas(Config::kAlignSize) InnerNode<String> {
   }
 
   bool to_next(String& key, void*& next, uint64_t& version) {
-    String* vpr;
-    int vpl;
-    return to_next(key, next, version, vpr, vpl, true);
-  }
-
-  bool to_next(String& key, void*& next, uint64_t& version,
-               String*& vpr, int& vpl, bool reliable) {
     // if next points to a child, return false, else next points to sibling, return true
     bool to_sibling;
 
@@ -998,7 +969,7 @@ class alignas(Config::kAlignSize) InnerNode<String> {
       }
 
       // phase 1: prefix comparison
-      int pcmp = to_next_phase1(key, next, to_sibling, vpr, vpl, reliable);
+      int pcmp = to_next_phase1(key, next, to_sibling);
 
       if(!pcmp) { // prefix of key is equal to node prefix
         int idx, rid, plen = plen_; // rid: row index, from higher byte to lower byte
