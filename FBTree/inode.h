@@ -898,6 +898,8 @@ class alignas(Config::kAlignSize) InnerNode<String> {
       // current node is the right-most node
       next_ = children_[index];
       knum_ -= 1;
+      // if no anchors in current node(root, right-most node), set plen
+      // to zero, guaranteeing lookup operation can be performed correctly
       if(knum_ == 0) plen_ = 0;
       else content_rebuild();
     } else {
@@ -974,6 +976,12 @@ class alignas(Config::kAlignSize) InnerNode<String> {
     }
   }
 
+  bool to_next(String& key, void*& next, uint64_t& version) {
+    String* vpr;
+    int vpl;
+    return to_next(key, next, version, vpr, vpl, true);
+  }
+
   bool to_next(String& key, void*& next, uint64_t& version,
                String*& vpr, int& vpl, bool reliable) {
     // if next points to a child, return false, else next points to sibling, return true
@@ -1027,8 +1035,10 @@ class alignas(Config::kAlignSize) InnerNode<String> {
         if(idx == knum_) {
           next = next_; // key is greater than all separators
           if(control_.has_sibling()) to_sibling = true;
+          assert(next != nullptr);
         } else {
           next = children_[idx];
+          assert(next != nullptr);
         }
       }
 
@@ -1055,6 +1065,7 @@ class alignas(Config::kAlignSize) InnerNode<String> {
       int rid, cmps, plen = plen_;
       uint64_t mask, eqmask = bitmap();
       cmps = std::min(kFeatureSize, key.len - plen_);
+      CONDITION_ERROR(key.len - plen_ < 0, "unknown error!");
 
       for(rid = 0; rid < cmps; rid++) {
         mask = compare_equal(features_[rid], key.str[plen + rid] + 128);
@@ -1143,13 +1154,21 @@ class alignas(Config::kAlignSize) InnerNode<String> {
       void* src = anchors_ + index + 1;
       void* dst = anchors_ + index;
       memmove64(src, dst, knum_ - index - 1, true);
-      if(index == 0) content_rebuild();
+      if(index != 0) { // normal remove without the need to re-extract prefix
+        for(int rid = 0; rid < kFeatureSize; rid++) {
+          src = features_[rid] + index + 1;
+          dst = features_[rid] + index;
+          memmove(dst, src, knum_ - index - 1);
+        }
+      }
 
       src = children_ + index + 2;
       dst = children_ + index + 1;
       memmove64(src, dst, knum_ - index - 2, true);
 
       knum_ -= 1; // knum >= 1
+      if(index == 0) content_rebuild();
+
       return merge(key);
     }
 

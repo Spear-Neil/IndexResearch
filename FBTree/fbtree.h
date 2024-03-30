@@ -320,7 +320,7 @@ class alignas(64) FBTree {
       current = work;
     }
 
-    int index, rootid;
+    int index, rootid = 0;
     void* merged, * next;
     KVPair* kv = leaf(current)->remove(key, merged, mid);
 
@@ -557,9 +557,6 @@ class alignas(64) FBTree<String, V> {
   // kv should be allocated by malloc
   KVPair* upsert(KVPair* kv) {
     assert(epoch_->guarded());
-    bool reliable = false;
-
-    restart:
     std::vector<void*> path_stack;
     path_stack.reserve(tree_depth_);
 
@@ -570,24 +567,12 @@ class alignas(64) FBTree<String, V> {
     // so an extreme case can perform correctly (no inner node here initially);
     // used to determine whether we need to move to sibling in leaf node
 
-    String* vpr = nullptr; // pointer of verification prefix, if using unreliable comparison
-    int vpl = 0; // length of verification prefix, if using unreliable comparison
-
     while(!is_leaf(current)) {
       work = current, parent = control(current);
-      if(!inner(work)->to_next(kv->key, current, version, vpr, vpl, reliable)) {
+      if(!inner(work)->to_next(kv->key, current, version)) {
         path_stack.push_back(work);
       } // move to a child or a sibling
       node_prefetch(current);
-    }
-
-    // verify whether our result is reliable
-    if(!reliable && vpr != nullptr) {
-      bool credible = prefix_verification(kv->key, *vpr, vpl);
-      if(!credible) {
-        reliable = true;
-        goto restart;
-      }
     }
 
     // reach leaf node
@@ -656,9 +641,6 @@ class alignas(64) FBTree<String, V> {
 
   KVPair* remove(String& key) {
     assert(epoch_->guarded());
-    bool reliable = false;
-
-    restart:
     std::vector<void*> path_stack;
     path_stack.reserve(tree_depth_);
 
@@ -669,24 +651,12 @@ class alignas(64) FBTree<String, V> {
     // so an extreme case can perform correctly (no inner node here initially);
     // used to determine whether we need to move to sibling in leaf node
 
-    String* vpr = nullptr; // pointer of verification prefix, if using unreliable comparison
-    int vpl = 0; // length of verification prefix, if using unreliable comparison
-
     while(!is_leaf(current)) {
       work = current, parent = control(current);
-      if(!inner(work)->to_next(key, current, version, vpr, vpl, reliable)) {
+      if(!inner(work)->to_next(key, current, version)) {
         path_stack.push_back(work);
       } // move to a child or a sibling
       node_prefetch(current);
-    }
-
-    // verify whether our result is reliable
-    if(!reliable && vpr != nullptr) {
-      bool credible = prefix_verification(key, *vpr, vpl);
-      if(!credible) {
-        reliable = true;
-        goto restart;
-      }
     }
 
     // reach leaf node
@@ -698,7 +668,7 @@ class alignas(64) FBTree<String, V> {
       current = work;
     }
 
-    int index, rootid;
+    int index, rootid = 0;
     void* merged, * next;
     String* mid;
     KVPair* kv = leaf(current)->remove(key, merged, mid);
@@ -776,8 +746,8 @@ class alignas(64) FBTree<String, V> {
     Control* parent = control(node);
     uint64_t pversion = 0;
 
-    String* vpr = nullptr;
-    int vpl = 0;
+    String* vpr = nullptr; // pointer of verification prefix, if using unreliable comparison
+    int vpl = 0; // length of verification prefix, if using unreliable comparison
 
     while(!is_leaf(node)) {
       parent = control(node);
@@ -826,8 +796,8 @@ class alignas(64) FBTree<String, V> {
     Control* parent = control(node);
     uint64_t pversion = 0;
 
-    String* vpr = nullptr;
-    int vpl = 0;
+    String* vpr = nullptr; // pointer of verification prefix, if using unreliable comparison
+    int vpl = 0; // length of verification prefix, if using unreliable comparison
 
     while(!is_leaf(node)) {
       parent = control(node);

@@ -541,8 +541,7 @@ class alignas(Config::kAlignSize) LeafNode<String, V> {
         rnkey = popcount(rnode->bitmap_);
         // ensure need to merge with right node
         if(lnkey + rnkey <= kMergeSize || lnkey == 0) {
-          merged = rnode;
-          mid = high_key_;
+          merged = rnode, mid = high_key_;
 
           // move kvs in sibling to current node
           uint64_t mask = rnode->bitmap_;
@@ -711,6 +710,7 @@ class alignas(Config::kAlignSize) LeafNode<String, V> {
     while(mask) {  // check whether the key exists or not
       idx = index_least1(mask);
       KVPair* old = kvs_[idx].load(load_order);
+      CONDITION_ERROR(old == nullptr, "unknown error");
       // old can't be nullptr, must be a valid pointer
       if(kv->key == old->key) {
         // using exchange, because other update operations may happen concurrently
@@ -758,10 +758,8 @@ class alignas(Config::kAlignSize) LeafNode<String, V> {
 
         /* set corresponding variables before setting flag */
         sibling_ = (LeafNode*) rnode;
-        String* high = keys.back().first;
-        high_key_ = (String*) malloc(high->len + sizeof(String));
-        high_key_->len = high->len;
-        memcpy(high_key_->str, high->str, high->len);
+        String& high = *keys.back().first;
+        high_key_ = make_string(high.str, high.len);
         control_.set_sibling();
       } else {
         // normal split, move half key-value pairs to the new node
@@ -787,10 +785,8 @@ class alignas(Config::kAlignSize) LeafNode<String, V> {
         bitmap_ &= ~mask;  // remove keys in leaf node
         CONDITION_ERROR(popcount(bitmap_) != kNodeSize / 2, "split error");
         sibling_ = (LeafNode*) rnode;
-        String* high = keys[kNodeSize / 2 - 1].first;
-        high_key_ = (String*) malloc(high->len + sizeof(String));
-        high_key_->len = high->len;
-        memcpy(high_key_->str, high->str, high->len);
+        String& high = *keys[kNodeSize / 2 - 1].first;
+        high_key_ = make_string(high.str, high.len);
 
         if(!control_.has_sibling()) control_.set_sibling();
         else ((LeafNode*) rnode)->control_.set_sibling();

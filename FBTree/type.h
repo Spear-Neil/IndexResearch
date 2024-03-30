@@ -2,6 +2,8 @@
 #define INDEXRESEARCH_TYPE_H
 
 #include <cstdint>
+#include <cassert>
+#include <cstring>
 #include "strutil.h"
 
 using util::compare;
@@ -65,6 +67,14 @@ struct KVPair<String, V> {
 
   KVPair() = delete;
 };
+
+String* make_string(char* str, int len) {
+  assert(str != nullptr && len >= 0);
+  String* ret = (String*) malloc(len + sizeof(String));
+  ret->len = len;
+  memcpy(ret->str, str, len);
+  return ret;
+}
 
 }
 
