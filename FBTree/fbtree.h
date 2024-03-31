@@ -49,7 +49,7 @@ class alignas(64) FBTree {
         kv_(it.kv_), pos_(it.pos_) {}
 
     // does current iterator point to the end
-    bool end() { return kv_ != nullptr; }
+    bool end() { return kv_ == nullptr; }
 
     iterator& advance() {
       assert(kv_ != nullptr);
@@ -291,9 +291,15 @@ class alignas(64) FBTree {
   }
 
   // kv should be allocated by malloc
-  KVPair* upsert(K key, V value) {
+  KVPair* upsert(K key, const V& value) {
     void* kv = malloc(sizeof(KVPair));
     new(kv) KVPair{key, value};
+    return upsert((KVPair*) kv);
+  }
+
+  KVPair* upsert(K key, V&& value) {
+    void* kv = malloc(sizeof(KVPair));
+    new(kv) KVPair{key, std::move(value)};
     return upsert((KVPair*) kv);
   }
 
@@ -393,9 +399,17 @@ class alignas(64) FBTree {
     return nullptr;  // the key doesn't exist
   }
 
-  KVPair* update(K key, V value) {
+  KVPair* update(K key, const V& value) {
     void* kv = malloc(sizeof(KVPair));
     new(kv) KVPair{key, value};
+    KVPair* ret = update((KVPair*) kv);
+    if(ret == nullptr) free(kv);
+    return ret;
+  }
+
+  KVPair* update(K key, V&& value) {
+    void* kv = malloc(sizeof(KVPair));
+    new(kv) KVPair{key, std::move(value)};
     KVPair* ret = update((KVPair*) kv);
     if(ret == nullptr) free(kv);
     return ret;
@@ -466,7 +480,47 @@ class alignas(64) FBTree<String, V> {
     int pos_;          // the ordinal of kv in current node (ordered view)
 
    public:
+    iterator() : node_(nullptr), kv_(nullptr) {}
 
+    iterator(LeafNode* node, uint64_t version, KVPair* kv, int pos) :
+      node_(node), version_(version), kv_(kv), pos_(pos) {}
+
+    iterator(const iterator& it)
+      : node_(it.node_), version_(it.version_),
+        kv_(it.kv_), pos_(it.pos_) {}
+
+    // does current iterator point to the end
+    bool end() { return kv_ == nullptr; }
+
+    iterator& advance() {
+      assert(kv_ != nullptr);
+      KVPair* next;
+      int pos;
+      uint64_t version;
+      // first, try to get the next kv in current node
+      std::tie(next, pos, version) = node_->access(kv_, pos_ + 1, version_);
+
+      // if we can't get the next kv in current node, go to its sibling node
+      while(next == nullptr) {
+        node_ = (LeafNode*) (node_->sibling());
+        if(node_ == nullptr) break;
+        // enforce using bound to get next kv
+        std::tie(next, pos, version) = node_->access(kv_, 0, 0);
+      }
+      kv_ = next, pos_ = pos, version_ = version;
+
+      return *this;
+    }
+
+    iterator& operator=(const iterator& it) {
+      node_ = it.node_, version_ = it.version_;
+      kv_ = it.kv_, pos_ = it.pos_;
+      return *this;
+    }
+
+    KVPair* operator->() { return kv_; }
+
+    KVPair& operator*() { return *kv_; }
   };
 
  private:
@@ -489,9 +543,65 @@ class alignas(64) FBTree<String, V> {
     }
   }
 
-  bool prefix_verification(String& key, String& pr, int len) {
-    CONDITION_ERROR(key.len < len || pr.len < len, "prefix verification error");
-    return !compare(key.str, len, pr.str, len); // return true, if equal
+  iterator bound(String& key, bool upper) {
+    // true for upper_bound, false for lower_bound
+    assert(epoch_->guarded());
+    void* node = root_;
+    Control* parent = control(node);
+    uint64_t pversion = 0;
+    while(!is_leaf(node)) {
+      inner(node)->to_next(key, node, pversion);
+      node_prefetch(node);
+    }
+
+    // reach leaf node
+    uint64_t version;
+    KVPair* kv;
+    int pos;
+
+    auto get_bound = [&]() {
+      bool unordered = false;
+
+      do {
+        version = control(node)->begin_read();
+        while(leaf(node)->to_sibling(key, node, parent, pversion)) {
+          version = control(node)->begin_read();
+        }
+        if(!control(node)->ordered()) {
+          unordered = true;
+          break;
+        }
+        // if kv pairs in node are ordered, try to get boundary kv without lock
+        std::tie(kv, pos) = leaf(node)->bound(key, upper);
+      } while(!control(node)->end_read(version));
+
+      // if kv pairs in node are unordered, lock the node and then get boundary kv
+      if(unordered) {
+        latch_exclusive(node);
+        void* sibling;
+        while(leaf(node)->to_sibling(key, sibling, parent, pversion)) {
+          latch_exclusive(sibling);
+          unlatch_exclusive(node);
+          node = sibling;
+        }
+        leaf(node)->kv_sort();
+        std::tie(kv, pos) = leaf(node)->bound(key, upper);
+        version = control(node)->load_version();
+        unlatch_exclusive(node);
+      }
+    };
+
+    get_bound();
+    // because high_key is never removed unless merge,
+    // so the boundary kv may be on the sibling node
+    while(kv == nullptr) {
+      node = leaf(node)->sibling();
+      if(node == nullptr) break;
+      // if kv is null, however node has sibling
+      get_bound();
+    }
+
+    return iterator((LeafNode*) node, version, kv, pos);
   }
 
  public:
@@ -632,11 +742,26 @@ class alignas(64) FBTree<String, V> {
   }
 
   // kv should be allocated by malloc
-  KVPair* upsert(char* key, int len, V value) {
+  KVPair* upsert(char* key, int len, const V& value) {
     KVPair* kv = (KVPair*) malloc(sizeof(KVPair) + len);
     kv->value = value, kv->key.len = len;
     memcpy(kv->key.str, key, len);
     return upsert(kv);
+  }
+
+  KVPair* upsert(char* key, int len, V&& value) {
+    KVPair* kv = (KVPair*) malloc(sizeof(KVPair) + len);
+    kv->value = std::move(value), kv->key.len = len;
+    memcpy(kv->key.str, key, len);
+    return upsert(kv);
+  }
+
+  KVPair* upsert(const std::string& key, const V& value) {
+    return upsert((char*) key.data(), key.size(), value);
+  }
+
+  KVPair* upsert(const std::string& key, V&& value) {
+    return upsert((char*) key.data(), key.size(), std::move(value));
   }
 
   KVPair* remove(String& key) {
@@ -736,6 +861,10 @@ class alignas(64) FBTree<String, V> {
     return kv;
   }
 
+  KVPair* remove(const std::string& key) {
+    return remove((char*) key.data(), key.size());
+  }
+
   // kv should be allocated by malloc
   KVPair* update(KVPair* kv) {
     assert(epoch_->guarded());
@@ -763,13 +892,30 @@ class alignas(64) FBTree<String, V> {
     return nullptr;
   }
 
-  KVPair* update(char* key, int len, V value) {
+  KVPair* update(char* key, int len, const V& value) {
     KVPair* kv = (KVPair*) malloc(sizeof(KVPair) + len);
     kv->value = value, kv->key.len = len;
     memcpy(kv->key.str, key, len);
     KVPair* ret = update(kv);
     if(ret == nullptr) free(kv);
     return ret;
+  }
+
+  KVPair* update(char* key, int len, V&& value) {
+    KVPair* kv = (KVPair*) malloc(sizeof(KVPair) + len);
+    kv->value = std::move(value), kv->key.len = len;
+    memcpy(kv->key.str, key, len);
+    KVPair* ret = update(kv);
+    if(ret == nullptr) free(kv);
+    return ret;
+  }
+
+  KVPair* update(const std::string& key, const V& value) {
+    return upsert((char*) key.data(), key.size(), value);
+  }
+
+  KVPair* update(const std::string& key, V&& value) {
+    return upsert((char*) key.data(), key.size(), std::move(value));
   }
 
   KVPair* lookup(String& key) {
@@ -814,7 +960,72 @@ class alignas(64) FBTree<String, V> {
     return kv;
   }
 
+  KVPair* lookup(const std::string& key) {
+    return lookup((char*) key.data(), key.size());
+  }
+
+  iterator begin() {
+    assert(epoch_->guarded());
+    LeafNode* node = leaf(root_track_[0]);
+    assert(node != nullptr);
+    iterator it(node, nullptr, 0);
+    it.version_ = control(node)->begin_read();
+    std::tie(it.kv_, it.pos_, it.version_) =
+      node->access(nullptr, 0, it.version_);
+    return it;
+  }
+
+  iterator lower_bound(String& key) {
+    return bound(key, false);
+  }
+
+  iterator lower_bound(char* key, int len) {
+    char buf[kBufSize + sizeof(String)];
+    String* str;
+
+    if(len <= kBufSize) str = (String*) buf;
+    else str = (String*) malloc(sizeof(String) + len);
+
+    str->len = len;
+    memcpy(str->str, key, len);
+    iterator it = lower_bound(*str);
+
+    if(len > kBufSize) free(str);
+
+    return it;
+  }
+
+  iterator lower_bound(const std::string& key) {
+    return lower_bound((char*) key.data(), key.size());
+  }
+
+  iterator upper_bound(String& key) {
+    return bound(key, true);
+  }
+
+  iterator upper_bound(char* key, int len) {
+    char buf[kBufSize + sizeof(String)];
+    String* str;
+
+    if(len <= kBufSize) str = (String*) buf;
+    else str = (String*) malloc(sizeof(String) + len);
+
+    str->len = len;
+    memcpy(str->str, key, len);
+    iterator it = upper_bound(*str);
+
+    if(len > kBufSize) free(str);
+
+    return it;
+  }
+
+  iterator upper_bound(const std::string& key) {
+    return upper_bound((char*) key.data(), key.size());
+  }
 };
+
+template<typename V>
+class FBTree<std::string, V> : public FBTree<String, V> {};
 
 }
 

@@ -800,7 +800,7 @@ struct btree_iterator {
 
   // Accessors for the key/value the iterator is pointing at.
   const key_type& key() const {
-    return node->str(position);
+    return node->key(position);
   }
   reference operator*() const {
     return node->value(position);
@@ -2304,7 +2304,7 @@ IterType btree<P>::internal_find_unique(
     }
     if (!res.second) {
       iter = internal_last(res.first);
-      if (iter.node && !compare_keys(key, iter.str())) {
+      if (iter.node && !compare_keys(key, iter.key())) {
         return iter;
       }
     }
@@ -2319,7 +2319,7 @@ IterType btree<P>::internal_find_multi(
     iter = internal_lower_bound(key, iter);
     if (iter.node) {
       iter = internal_last(iter);
-      if (iter.node && !compare_keys(key, iter.str())) {
+      if (iter.node && !compare_keys(key, iter.key())) {
         return iter;
       }
     }

@@ -380,6 +380,7 @@ class alignas(Config::kAlignSize) LeafNode {
     if(!control_.ordered()) {
       char tags[kNodeSize];
       std::vector<std::pair<KVPair*, int>> keys;
+      keys.reserve(kNodeSize);
 
       uint64_t mask = bitmap_;
       while(mask) {
@@ -435,6 +436,7 @@ class alignas(Config::kAlignSize) LeafNode {
 
     // if we can't find the key in current node
     std::vector<K> keys;
+    keys.reserve(kNodeSize);
     for(int kid = 0; kid < nkey; kid++) {
       KVPair* kv = kvs_[kid].load(load_order);
       // the key has been removed or moved into other nodes
@@ -573,6 +575,13 @@ class alignas(Config::kAlignSize) LeafNode<String, V> {
         rnode->control_.unlatch_exclusive();
       }
     }
+  }
+
+  KVPair* access(int pos) {
+    if(pos < 0 || pos >= kNodeSize) return nullptr;
+    uint64_t mask = 0x01ul << pos;
+    if(mask & bitmap_ == 0) return nullptr;
+    return kvs_[pos].load(load_order);
   }
 
  public:
@@ -837,6 +846,111 @@ class alignas(Config::kAlignSize) LeafNode<String, V> {
     }
 
     return nullptr; // key does not exist
+  }
+
+  // sort kv pairs, current node need to be latched like remove/upsert,executed concurrently with lookup, update
+  // lookup/update never change the order of kv pairs in current node, so the ordered flag never changed
+  // upsert/remove may change the order of kv pairs in current node, note modification of the ordered flag
+  void kv_sort() {
+    if(!control_.ordered()) {
+      char tags[kNodeSize];
+      std::vector<std::pair<KVPair*, int>> keys;
+
+      uint64_t mask = bitmap_;
+      while(mask) {
+        int idx = index_least1(mask);
+        // get the latest value, and set it to null, inform update threads
+        KVPair* kv = kvs_[idx].exchange(nullptr);
+        // kv can't be nullptr, must be a valid pointer
+        keys.push_back(std::make_pair(kv, idx));
+        mask &= ~(0x01ul << idx);
+      }
+
+      auto less = [](std::pair<KVPair*, int>& a,
+                     std::pair<KVPair*, int>& b) {
+        return a.first->key < b.first->key;
+      };
+      std::sort(keys.begin(), keys.end(), less);
+
+      for(int idx = 0; idx < keys.size(); idx++) {
+        auto [kv, pos] = keys[idx];
+        tags[idx] = tags_[pos];
+        kvs_[idx].store(kv, store_order);
+      }
+      memcpy(tags_, tags, kNodeSize);
+      bitmap_ = bitmap(keys.size());
+
+      control_.set_order();
+      control_.update_version();
+    }
+  }
+
+  std::pair<KVPair*, int> bound(String& key, bool upper) {
+    // true for upper_bound, false for lower_bound
+    // first try to search the key in current node
+    int nkey = popcount(bitmap_);
+    char tag = hash(key.str, key.len); // finger print generation
+    uint64_t mask = bitmap_ & compare_equal(tags_, tag); // candidates
+
+    while(mask) { // check whether the key exists or not
+      int idx = index_least1(mask);
+      KVPair* kv = kvs_[idx].load(load_order);
+      // some other threads may be splitting or removing or sorting
+      if(kv != nullptr && key == kv->key) {
+        // find the key in current node
+        if(upper) {
+          if(idx + 1 >= nkey) std::make_pair(nullptr, 0);
+          kv = kvs_[idx + 1].load(load_order);
+          return std::make_pair(kv, idx + 1);
+        }
+        return std::make_pair(kv, idx);
+      }
+      mask &= ~(0x01ul << idx);
+    }
+
+    // if we can't find the key in current node
+    std::vector<String*> keys;
+    keys.reserve(kNodeSize);
+    for(int kid = 0; kid < nkey; kid++) {
+      KVPair* kv = kvs_[kid].load(load_order);
+      // the key has been removed or moved into other nodes
+      if(kv == nullptr) return std::make_pair(nullptr, 0);
+      keys.push_back(&kv->key);
+    }
+
+    // upper_bound is equivalent to lower_bound
+    auto less = [](String* k1, String* k2) { return *k1 < *k2; };
+    auto it = std::upper_bound(keys.begin(), keys.end(), &key, less);
+    int kid = it - keys.begin(); // the ordinal of bound kv in ordered view
+    // key is greater than all keys in current node or current node is empty
+    if(kid >= nkey) return std::make_pair(nullptr, 0);
+    KVPair* kv = kvs_[kid].load(load_order);
+    // finally we get bound kv and its ordinal, kv may be null
+    return std::make_pair(kv, kid);
+  }
+
+  auto access(KVPair* kv, int pos, uint64_t version) {
+    // in most cases, kvs are ordered, access kv by pos first
+    KVPair* next;
+    if(control_.ordered()) {
+      next = access(pos);
+      // if kvs are ordered, and version hasn't changed
+      if(control_.end_read(version))
+        return std::tuple(next, pos, version);
+    }
+
+    // kvs are unordered or version has changed
+    control_.latch_exclusive();
+    kv_sort(); // sort kvs
+    // kv is valid, get the next kv pair by bound
+    if(kv != nullptr) {
+      std::tie(next, pos) = bound(kv->key, true);
+    } else { next = access(pos); }
+    // kv is null, get kv pair by pos, begin()
+    version = control_.load_version();
+    control_.unlatch_exclusive();
+
+    return std::tuple(next, pos, version);
   }
 };
 
