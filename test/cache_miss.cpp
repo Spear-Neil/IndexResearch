@@ -2,9 +2,8 @@
 #include <vector>
 #include <set>
 #include <algorithm>
-#include "FBTree/fbtree.h"
+#include "../FBTree/fbtree.h"
 #include "tlx/container.hpp"
-#include "GoogleBTree/btree_map.h"
 #include "util.h"
 
 using namespace util;
@@ -116,7 +115,7 @@ int main(int argc, char* argv[]) {
   } else if(tree_type == 1) {
     std::cout << "-- tree_type: StxBTre, with query: " << wi_query << std::endl;
     stx_driver(keys, wi_query);
-  }  else {
+  } else {
     std::cout << "-- error tree type" << std::endl;
   }
 
