@@ -15,24 +15,19 @@ using namespace util;
 void data_prepare(std::vector<uint64_t>& warmup, std::vector<uint64_t>& runs,
                   size_t warmup_size, size_t run_size, int run_type) {
   std::cout << "-- data prepare ... " << std::flush;
-  std::set<uint64_t> uniq;
   uint64_t gen_count = 0;
-
   while(true) {
-    uniq.insert(hash(gen_count++));
-    if(uniq.size() >= warmup_size) break;
+    warmup.push_back(hash(gen_count++));
+    if(warmup.size() >= warmup_size) break;
   }
-  for(auto key : uniq) warmup.push_back(key);
 
   while(true) {
     uint64_t key = gen_count++;  // monotonically increasing integer
-    if(run_type == 0) key = hash(key); // random
-
-    if(uniq.find(key) == uniq.end()) {
-      runs.push_back(key), uniq.insert(key);
-    }
-    if(uniq.size() >= warmup_size + run_size) break;
+    if(run_type == 0) key = hash(key); // random integer keys
+    runs.push_back(key);
+    if(runs.size() >= run_size) break;
   }
+
   if(run_size != runs.size() || warmup.size() != warmup.size()) {
     std::cout << "\n-- data prepare error" << std::endl;
     exit(-1);
@@ -93,7 +88,7 @@ int main(int argc, char* argv[]) {
     tree->insert(key, key);
   }
   long drt = timer.duration_us();
-  warmup_tpt = double(warmup_size) / drt;
+  warmup_tpt += double(warmup_size) / drt;
   std::cout << "end" << std::endl;
 
   std::vector<std::thread> workers;
@@ -145,6 +140,7 @@ int main(int argc, char* argv[]) {
         bool find = tree->lookup(key, value);
         if(!find || key != value) {
           std::cout << "\n-- tid: " << tid << ", lookup error" << std::endl;
+          exit(-1);
         }
         if(opcnt++ % 10000 == 0 && timer.duration_s() > run_time) break;
       }
@@ -158,7 +154,6 @@ int main(int argc, char* argv[]) {
     lookup_tpt += tpt[tid];
   }
   std::cout << "end" << std::endl;
-
 
   std::cout << "-- random shuffle ... " << std::flush;
   std::random_shuffle(runs.begin(), runs.end());
@@ -177,6 +172,7 @@ int main(int argc, char* argv[]) {
         int count = tree->scan(key, scan_size);
         if(count < 0) {
           std::cout << "\n-- tid: " << tid << ", scan error" << std::endl;
+          exit(-1);
         }
         if(opcnt++ % 10000 == 0 && timer.duration_s() > run_time) break;
       }
