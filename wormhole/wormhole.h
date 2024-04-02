@@ -8,6 +8,8 @@
 
 inline thread_local wormref* whref;
 
+using util::byte_swap;
+
 class WormHole {
   wormhole* wh;
 

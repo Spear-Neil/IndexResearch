@@ -43,20 +43,20 @@ struct String {
 
   String() = delete;
 
-  bool operator<(String& k) {
-    return compare(str, len, k.str, k.len) < 0;
+  bool operator<(const String& k) {
+    return compare(str, len, (char*) k.str, k.len) < 0;
   }
 
-  bool operator>(String& k) {
-    return compare(str, len, k.str, k.len) > 0;
+  bool operator>(const String& k) {
+    return compare(str, len, (char*) k.str, k.len) > 0;
   }
 
-  bool operator==(String& k) {
-    return !compare(str, len, k.str, k.len);
+  bool operator==(const String& k) {
+    return !compare(str, len, (char*) k.str, k.len);
   }
 
-  bool operator!=(String& k) {
-    return compare(str, len, k.str, k.len);
+  bool operator!=(const String& k) {
+    return compare(str, len, (char*) k.str, k.len);
   }
 };
 

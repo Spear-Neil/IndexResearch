@@ -377,6 +377,7 @@ class alignas(64) FBTree {
   }
 
   // kv should be allocated by malloc
+  // update can also be implemented through kv returned by lookup
   KVPair* update(KVPair* kv) {
     assert(epoch_->guarded());
     K key = encode_convert(kv->key);
@@ -866,6 +867,7 @@ class alignas(64) FBTree<String, V> {
   }
 
   // kv should be allocated by malloc
+  // update can also be implemented through kv returned by lookup
   KVPair* update(KVPair* kv) {
     assert(epoch_->guarded());
     void* node = root_;

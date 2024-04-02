@@ -65,12 +65,12 @@ inline LabelDelete *DeletionList::head() {
     return headDeletionList;
 }
 
-inline void Epoche::enterEpoche(ThreadInfo &epocheInfo) {
+__attribute_used__ inline void Epoche::enterEpoche(ThreadInfo &epocheInfo) {
     unsigned long curEpoche = currentEpoche.load(std::memory_order_relaxed);
     epocheInfo.getDeletionList().localEpoche.store(curEpoche, std::memory_order_release);
 }
 
-inline void Epoche::markNodeForDeletion(void *n, ThreadInfo &epocheInfo) {
+__attribute_used__ inline void Epoche::markNodeForDeletion(void *n, ThreadInfo &epocheInfo) {
     epocheInfo.getDeletionList().add(n, currentEpoche.load());
     epocheInfo.getDeletionList().thresholdCounter++;
 }
@@ -149,7 +149,7 @@ inline DeletionList &ThreadInfo::getDeletionList() const {
     return deletionList;
 }
 
-inline Epoche &ThreadInfo::getEpoche() const {
+__attribute_used__ inline Epoche &ThreadInfo::getEpoche() const {
     return epoche;
 }
 
