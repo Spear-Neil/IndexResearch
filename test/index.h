@@ -18,12 +18,7 @@ class Index {
 
   virtual bool lookup(K& key, V& value) = 0;
 
-  virtual int scan_impl(K& key, int num, V* out) = 0;
-
-  int scan(K& key, int num) {
-    V out[num];
-    return scan_impl(key, num, out);
-  }
+  virtual int scan(K& key, int num) = 0;
 };
 
 enum INDEX_TYPE {

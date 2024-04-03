@@ -36,7 +36,7 @@ void data_prepare(std::vector<uint64_t>& warmup, std::vector<uint64_t>& runs,
 }
 
 int main(int argc, char* argv[]) {
-  if(argc < 5) {
+  if(argc < 6) {
     std::cout << "-- arg 0: warmup load size\n"
               << "-- arg 1: run load size\n"
               << "-- arg 2: run time (lookup/scan)\n"

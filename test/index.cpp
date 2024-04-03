@@ -82,7 +82,7 @@ class IndexART<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
     return true;
   }
 
-  int scan_impl(uint64_t& key, int num, uint64_t* out) {
+  int scan(uint64_t& key, int num) {
     static thread_local auto t = tree.getThreadInfo();
     Key starts;
     Key continues;
@@ -91,7 +91,6 @@ class IndexART<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
     TID tids[num];
     size_t count;
     tree.lookupRange(starts, max_key, continues, tids, num, count, t);
-    for(int i = 0; i < count; i++) { out[i] = ((pair*) tids[i])->value; }
 
     return count;
   }
@@ -174,7 +173,7 @@ class IndexART<std::string, uint64_t> : public Index<std::string, uint64_t> {
     return true;
   }
 
-  int scan_impl(std::string& key, int num, uint64_t* out) {
+  int scan(std::string& key, int num) {
     static thread_local auto t = tree.getThreadInfo();
     Key starts;
     Key continues;
@@ -183,7 +182,6 @@ class IndexART<std::string, uint64_t> : public Index<std::string, uint64_t> {
     TID tids[num];
     size_t count;
     tree.lookupRange(starts, max_key, continues, tids, num, count, t);
-    for(int i = 0; i < count; i++) { out[i] = ((pair*) tids[i])->value; }
 
     return count;
   }
@@ -235,12 +233,11 @@ class IndexHOT<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
     return false;
   }
 
-  int scan_impl(uint64_t& key, int num, uint64_t* out) {
+  int scan(uint64_t& key, int num) {
     auto iterator = tree.lower_bound(key);
     int count = 0;
     for(size_t i = 0; i < num; i++) {
       if(iterator == tree.end()) break;
-      out[i] = (*iterator)->value;
       count++, ++iterator;
     }
     return count;
@@ -297,12 +294,11 @@ class IndexHOT<std::string, uint64_t> : public Index<std::string, uint64_t> {
     return false;
   }
 
-  int scan_impl(std::string& key, int num, uint64_t* out) {
+  int scan(std::string& key, int num) {
     auto iterator = tree.lower_bound(key.data());
     int count = 0;
     for(size_t i = 0; i < num; i++) {
       if(iterator == tree.end()) break;
-      out[i] = (*iterator)->value;
       count++, ++iterator;
     }
     return count;
@@ -334,7 +330,8 @@ class IndexBTreeOLC<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
     return tree.lookup(key, value);
   }
 
-  int scan_impl(uint64_t& key, int num, uint64_t* out) {
+  int scan(uint64_t& key, int num) {
+    uint64_t out[num];
     return tree.scan(key, num, out);
   }
 };
@@ -400,9 +397,11 @@ class IndexBTreeOLC<std::string, uint64_t> : public Index<std::string, uint64_t>
     return find;
   }
 
-  int scan_impl(std::string& key, int num, uint64_t* out) {
+  int scan(std::string& key, int num) {
     String k;
     k.construct(key.data(), key.size());
+
+    uint64_t out[num];
     int count = tree.scan(k, num, out);
     free(k.key);
     return count;
@@ -447,13 +446,12 @@ class IndexFBTree<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
     return true;
   }
 
-  int scan_impl(uint64_t& key, int num, uint64_t* out) {
+  int scan(uint64_t& key, int num) {
     EpochGuard guard(tree.get_epoch());
     auto it = tree.lower_bound(key);
     int count = 0;
     for(int i = 0; i < num; i++) {
       if(it.end()) break;
-      out[i] = it->value;
       count++, it.advance();
     }
     return count;
@@ -498,13 +496,12 @@ class IndexFBTree<std::string, uint64_t> : public Index<std::string, uint64_t> {
     return true;
   }
 
-  int scan_impl(std::string& key, int num, uint64_t* out) {
+  int scan(std::string& key, int num) {
     EpochGuard guard(tree.get_epoch());
     auto it = tree.lower_bound(key);
     int count = 0;
     for(int i = 0; i < num; i++) {
       if(it.end()) break;
-      out[i] = it->value;
       count++, it.advance();
     }
     return count;
@@ -533,17 +530,15 @@ class MassTreeBase {
   struct Scanner {
     int count;
     int num;
-    uint64_t* out;
 
-    Scanner(int size, uint64_t* ouput) : count(0), num(size), out(ouput) {}
+    Scanner(int size) : count(0), num(size) {}
 
     template<typename SS, typename K>
     void visit_leaf(const SS&, const K&, threadinfo&) {
     }
 
     bool visit_value(lcdf::Str key, uint64_t value, threadinfo&) {
-      out[count++] = value;
-      if(count < num) return true;
+      if(++count < num) return true;
 
       return false;
     }
@@ -600,11 +595,11 @@ class MassTreeBase {
     info->rcu_stop();
   }
 
-  int scan(char* key, int len, int num, uint64_t* out) {
+  int scan(char* key, int len, int num) {
     threadinfo* info = get_info();
     info->rcu_start();
     lcdf::Str first(key, len);
-    Scanner scanner(num, out);
+    Scanner scanner(num);
     int count = tree_.scan(first, true, scanner, *info);
     info->rcu_stop();
     return count;
@@ -642,9 +637,9 @@ class IndexMASS<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
     return tree.lookup((char*) &k, 8, value);
   }
 
-  int scan_impl(uint64_t& key, int num, uint64_t* out) {
+  int scan(uint64_t& key, int num) {
     uint64_t k = byte_swap(key);
-    return tree.scan((char*) &k, 8, num, out);
+    return tree.scan((char*) &k, 8, num);
   }
 };
 
@@ -675,8 +670,8 @@ class IndexMASS<std::string, uint64_t> : public Index<std::string, uint64_t> {
     return tree.lookup(key.data(), key.size(), value);
   }
 
-  int scan_impl(std::string& key, int num, uint64_t* out) {
-    return tree.scan(key.data(), key.size(), num, out);
+  int scan(std::string& key, int num) {
+    return tree.scan(key.data(), key.size(), num);
   }
 };
 
@@ -723,7 +718,7 @@ class IndexWH<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
     return wh_get(whref, &k, 8, &value, 8, &vlen);
   }
 
-  int scan_impl(uint64_t& key, int num, uint64_t* out) {
+  int scan(uint64_t& key, int num) {
     make_ref();
     uint64_t k = byte_swap(key);
 
@@ -732,8 +727,6 @@ class IndexWH<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
     int count = 0;
     for(int i = 0; i < num; i++) {
       if(!wh_iter_valid(iter)) break;
-      uint32_t vlen;
-      wh_iter_peek(iter, nullptr, 0, nullptr, &out[i], 8, &vlen);
       count++, wh_iter_skip1(iter);
     }
     wh_iter_destroy(iter);
@@ -781,7 +774,7 @@ class IndexWH<std::string, uint64_t> : public Index<std::string, uint64_t> {
     return wh_get(whref, key.data(), key.size(), &value, 8, &vlen);
   }
 
-  int scan_impl(std::string& key, int num, uint64_t* out) {
+  int scan(std::string& key, int num) {
     make_ref();
 
     wormhole_iter* iter = wh_iter_create(whref);
@@ -789,8 +782,6 @@ class IndexWH<std::string, uint64_t> : public Index<std::string, uint64_t> {
     int count = 0;
     for(int i = 0; i < num; i++) {
       if(!wh_iter_valid(iter)) break;
-      uint32_t vlen;
-      wh_iter_peek(iter, nullptr, 0, nullptr, &out[i], 8, &vlen);
       count++, wh_iter_skip1(iter);
     }
     wh_iter_destroy(iter);
@@ -836,12 +827,11 @@ class IndexGBTree<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
     return true;
   }
 
-  int scan_impl(uint64_t& key, int num, uint64_t* out) {
+  int scan(uint64_t& key, int num) {
     auto it = tree.lower_bound(key);
     int count = 0;
     for(int i = 0; i < num; i++) {
       if(it == tree.end()) break;
-      out[i] = it->second;
       count++, it++;
     }
     return count;
@@ -872,7 +862,8 @@ class IndexGBTree<std::string, uint64_t> : public Index<std::string, uint64_t> {
     }
 
     String(const String& str) {
-      construct(str.key->str, str.key->len);
+      if(str.key != nullptr)
+        construct(str.key->str, str.key->len);
     }
 
     String(String&& str) {
@@ -886,6 +877,7 @@ class IndexGBTree<std::string, uint64_t> : public Index<std::string, uint64_t> {
     }
 
     String& operator=(String&& str) {
+      free(key);
       key = str.key;
       str.key = nullptr;
     }
@@ -930,12 +922,11 @@ class IndexGBTree<std::string, uint64_t> : public Index<std::string, uint64_t> {
     return true;
   }
 
-  int scan_impl(std::string& key, int num, uint64_t* out) {
+  int scan(std::string& key, int num) {
     auto it = tree.lower_bound(String(key));
     int count = 0;
     for(int i = 0; i < num; i++) {
       if(it == tree.end()) break;
-      out[i] = it->second;
       count++, it++;
     }
     return count;
@@ -979,13 +970,12 @@ class IndexSTX<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
     return true;
   }
 
-  int scan_impl(uint64_t& key, int num, uint64_t* out) {
+  int scan(uint64_t& key, int num) {
     auto it = tree.lower_bound(key);
     int count = 0;
 
     for(int i = 0; i < num; i++) {
       if(it == tree.end())break;
-      out[i] = it->second;
       count++, it++;
     }
 
@@ -1017,7 +1007,8 @@ class IndexSTX<std::string, uint64_t> : public Index<std::string, uint64_t> {
     }
 
     String(const String& str) {
-      construct(str.key->str, str.key->len);
+      if(str.key != nullptr)
+        construct(str.key->str, str.key->len);
     }
 
     String(String&& str) {
@@ -1031,6 +1022,7 @@ class IndexSTX<std::string, uint64_t> : public Index<std::string, uint64_t> {
     }
 
     String& operator=(String&& str) {
+      free(key);
       key = str.key;
       str.key = nullptr;
     }
@@ -1075,13 +1067,12 @@ class IndexSTX<std::string, uint64_t> : public Index<std::string, uint64_t> {
     return true;
   }
 
-  int scan_impl(std::string& key, int num, uint64_t* out) {
+  int scan(std::string& key, int num) {
     auto it = tree.lower_bound(String(key));
     int count = 0;
 
     for(int i = 0; i < num; i++) {
       if(it == tree.end())break;
-      out[i] = it->second;
       count++, it++;
     }
 
