@@ -14,7 +14,7 @@
 using namespace util;
 
 void data_prepare(std::vector<std::string>& warmup, std::vector<std::string>& runs,
-                  size_t warmup_size, size_t run_size, int run_type) {
+                  size_t& warmup_size, size_t& run_size, int run_type) {
   std::string file;
   if(run_type == 0) file = "/home/sn/twitter_load";
   else if(run_type == 1) file = "/mnt/pmem0/twitter_load";
@@ -47,6 +47,8 @@ void data_prepare(std::vector<std::string>& warmup, std::vector<std::string>& ru
     runs.push_back(std::move(line));
     if(runs.size() >= run_size) break;
   }
+
+  warmup_size = warmup.size(), run_size = runs.size();
   std::cout << "end, warm size: " << warmup.size() << ", run size: " << runs.size()
             << ", avg len of runs: " << avg_len / runs.size() << std::endl;
 }
