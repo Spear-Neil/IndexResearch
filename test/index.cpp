@@ -850,36 +850,24 @@ class IndexGBTree<std::string, uint64_t> : public Index<std::string, uint64_t> {
       memcpy(key->str, str, len);
     }
 
-    String() : key(nullptr) {}
+    String() { construct(nullptr, 0); }
 
     explicit String(const std::string& key) {
       construct((char*) key.data(), key.size());
     }
 
+    String(const String& str) {
+      construct(str.key->str, str.key->len);
+    }
+
     ~String() {
       free(key);
-      key = nullptr;
-    }
-
-    String(const String& str) {
-      if(str.key != nullptr)
-        construct(str.key->str, str.key->len);
-    }
-
-    String(String&& str) {
-      key = str.key;
-      str.key = nullptr;
     }
 
     String& operator=(const String& str) {
       free(key);
       construct(str.key->str, str.key->len);
-    }
-
-    String& operator=(String&& str) {
-      free(key);
-      key = str.key;
-      str.key = nullptr;
+      return *this;
     }
 
     friend bool operator<(const String& k1, const String& k2) {
@@ -995,36 +983,24 @@ class IndexSTX<std::string, uint64_t> : public Index<std::string, uint64_t> {
       memcpy(key->str, str, len);
     }
 
-    String() : key(nullptr) {}
+    String() { construct(nullptr, 0); }
 
     explicit String(const std::string& key) {
       construct((char*) key.data(), key.size());
     }
 
+    String(const String& str) {
+      construct(str.key->str, str.key->len);
+    }
+
     ~String() {
       free(key);
-      key = nullptr;
-    }
-
-    String(const String& str) {
-      if(str.key != nullptr)
-        construct(str.key->str, str.key->len);
-    }
-
-    String(String&& str) {
-      key = str.key;
-      str.key = nullptr;
     }
 
     String& operator=(const String& str) {
       free(key);
       construct(str.key->str, str.key->len);
-    }
-
-    String& operator=(String&& str) {
-      free(key);
-      key = str.key;
-      str.key = nullptr;
+      return *this;
     }
 
     friend bool operator<(const String& k1, const String& k2) {
