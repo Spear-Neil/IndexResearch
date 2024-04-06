@@ -53,21 +53,30 @@ class alignas(64) FBTree {
 
     iterator& advance() {
       assert(kv_ != nullptr);
+      LeafNode* node = node_;
+      uint64_t version;
       KVPair* next;
       int pos;
-      uint64_t version;
+
       // first, try to get the next kv in current node
-      std::tie(next, pos, version) = node_->access(kv_, pos_ + 1, version_);
+      std::tie(next, pos, version) = node->access(kv_, pos_ + 1, version_);
 
       // if we can't get the next kv in current node, go to its sibling node
       while(next == nullptr) {
-        node_ = (LeafNode*) (node_->sibling());
-        if(node_ == nullptr) break;
-        // enforce using bound to get next kv
-        std::tie(next, pos, version) = node_->access(kv_, 0, 0);
-      }
-      kv_ = next, pos_ = pos, version_ = version;
+        node = (LeafNode*) (node->sibling());
+        if(node == nullptr) break;
 
+        // first try to optimistically access the first kv in sibling
+        version = ((Control*) node)->begin_read();
+        std::tie(next, pos, version) = node->access(nullptr, 0, version);
+        // left node in a consistent state, succeed to get next kv
+        if(((Control*) node_)->end_read(version_)) break;
+
+        // enforce using bound to get next kv
+        std::tie(next, pos, version) = node->access(kv_, 0, 0);
+      }
+
+      node_ = node, version_ = version, kv_ = next, pos_ = pos;
       return *this;
     }
 
@@ -443,7 +452,7 @@ class alignas(64) FBTree {
     assert(epoch_->guarded());
     LeafNode* node = leaf(root_track_[0]);
     assert(node != nullptr);
-    iterator it(node, nullptr, 0);
+    iterator it(node, 0, nullptr, 0);
     it.version_ = control(node)->begin_read();
     std::tie(it.kv_, it.pos_, it.version_) =
       node->access(nullptr, 0, it.version_);
@@ -495,21 +504,30 @@ class alignas(64) FBTree<String, V> {
 
     iterator& advance() {
       assert(kv_ != nullptr);
+      LeafNode* node = node_;
+      uint64_t version;
       KVPair* next;
       int pos;
-      uint64_t version;
+
       // first, try to get the next kv in current node
-      std::tie(next, pos, version) = node_->access(kv_, pos_ + 1, version_);
+      std::tie(next, pos, version) = node->access(kv_, pos_ + 1, version_);
 
       // if we can't get the next kv in current node, go to its sibling node
       while(next == nullptr) {
-        node_ = (LeafNode*) (node_->sibling());
-        if(node_ == nullptr) break;
-        // enforce using bound to get next kv
-        std::tie(next, pos, version) = node_->access(kv_, 0, 0);
-      }
-      kv_ = next, pos_ = pos, version_ = version;
+        node = (LeafNode*) (node->sibling());
+        if(node == nullptr) break;
 
+        // first try to optimistically access the first kv in sibling
+        version = ((Control*) node)->begin_read();
+        std::tie(next, pos, version) = node->access(nullptr, 0, version);
+        // left node in a consistent state, succeed to get next kv
+        if(((Control*) node_)->end_read(version_)) break;
+
+        // enforce using bound to get next kv
+        std::tie(next, pos, version) = node->access(kv_, 0, 0);
+      }
+
+      node_ = node, version_ = version, kv_ = next, pos_ = pos;
       return *this;
     }
 
@@ -970,7 +988,7 @@ class alignas(64) FBTree<String, V> {
     assert(epoch_->guarded());
     LeafNode* node = leaf(root_track_[0]);
     assert(node != nullptr);
-    iterator it(node, nullptr, 0);
+    iterator it(node, 0, nullptr, 0);
     it.version_ = control(node)->begin_read();
     std::tie(it.kv_, it.pos_, it.version_) =
       node->access(nullptr, 0, it.version_);
