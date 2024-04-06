@@ -1,8 +1,6 @@
 #include <iostream>
 #include <vector>
 #include <algorithm>
-#include <random>
-#include <set>
 #include <mutex>
 #include <thread>
 #include "index.h"
@@ -93,28 +91,52 @@ int main(int argc, char* argv[]) {
 
   std::vector<std::thread> workers;
   std::mutex lock;
+  std::atomic<bool> terminate;
+  std::atomic<int> ready;
   std::vector<double> tpt;
+
+  auto preparation = [&]() {
+    pinning.reset_pinning_counter(0, 0);
+    workers.clear(), tpt.clear();
+    terminate.store(false), ready.store(0);
+  };
+
+  auto termination = [&]() {
+    while(ready.load() != nthd);
+    timer.start();
+    while(timer.duration_s() < run_time) {
+      using namespace std::chrono_literals;
+      std::this_thread::sleep_for(1ms);
+    }
+    terminate.store(true);
+  };
 
   std::cout << "-- random shuffle ... " << std::flush;
   std::random_shuffle(runs.begin(), runs.end());
   std::cout << "insert ... " << std::flush;
-  pinning.reset_pinning_counter(0, 0);
-  workers.clear(), tpt.clear();
+  preparation();
   for(int tid = 0; tid < nthd; tid++) {
     workers.push_back(std::thread([&](int tid) {
       pinning.pinning_thread_continuous(pthread_self());
-      Timer<> timer;
-      timer.start();
       size_t begin = tid * run_size / nthd;
       size_t end = (tid + 1) * run_size / nthd;
-      uint64_t key;
+
+      std::vector<uint64_t> local_runs;
+      local_runs.reserve(end - begin);
       for(size_t i = begin; i < end; i++) {
-        key = runs[i];
+        local_runs.push_back(runs[i]);
+      }
+      ready.fetch_add(1);
+      while(ready.load() != nthd);
+
+      Timer<> timer;
+      timer.start();
+      for(uint64_t key : local_runs) {
         tree->insert(key, key);
       }
       long drt = timer.duration_us();
       std::lock_guard<std::mutex> guard(lock);
-      tpt.push_back(double(end - begin) / drt);
+      tpt.push_back(double(local_runs.size()) / drt);
     }, tid));
   }
   for(int tid = 0; tid < nthd; tid++) {
@@ -126,29 +148,41 @@ int main(int argc, char* argv[]) {
   std::cout << "-- random shuffle ... " << std::flush;
   std::random_shuffle(runs.begin(), runs.end());
   std::cout << "lookup ... " << std::flush;
-  pinning.reset_pinning_counter(0, 0);
-  workers.clear(), tpt.clear();
+  preparation();
   for(int tid = 0; tid < nthd; tid++) {
     workers.push_back(std::thread([&](int tid) {
       pinning.pinning_thread_continuous(pthread_self());
+      size_t begin = tid * run_size / nthd;
+      size_t end = (tid + 1) * run_size / nthd;
+
+      std::vector<uint64_t> local_runs;
+      local_runs.reserve(end - begin);
+      for(size_t i = begin; i < end; i++) {
+        local_runs.push_back(runs[i]);
+      }
+      ready.fetch_add(1);
+      while(ready.load() != nthd);
+
       Timer<> timer;
       timer.start();
-      size_t start = tid * run_size / nthd, size = run_size / nthd;
-      uint64_t key, value, opcnt = 0;
+
+      uint64_t value, opcnt = 0, size = local_runs.size();
       while(true) {
-        key = runs[start + opcnt % size];
+        uint64_t key = local_runs[opcnt % size];
         bool find = tree->lookup(key, value);
         if(!find || key != value) {
           std::cout << "\n-- tid: " << tid << ", lookup error" << std::endl;
           exit(-1);
         }
-        if(opcnt++ % 10000 == 0 && timer.duration_s() > run_time) break;
+        if(opcnt++ % 10000 == 0 && terminate.load()) break;
       }
       long drt = timer.duration_us();
       std::lock_guard<std::mutex> guard(lock);
       tpt.push_back(double(opcnt) / drt);
     }, tid));
   }
+
+  termination();
   for(int tid = 0; tid < nthd; tid++) {
     workers[tid].join();
     lookup_tpt += tpt[tid];
@@ -158,29 +192,41 @@ int main(int argc, char* argv[]) {
   std::cout << "-- random shuffle ... " << std::flush;
   std::random_shuffle(runs.begin(), runs.end());
   std::cout << "scan ... " << std::flush;
-  pinning.reset_pinning_counter(0, 0);
-  workers.clear(), tpt.clear();
+  preparation();
   for(int tid = 0; tid < nthd; tid++) {
     workers.push_back(std::thread([&](int tid) {
       pinning.pinning_thread_continuous(pthread_self());
+      size_t begin = tid * run_size / nthd;
+      size_t end = (tid + 1) * run_size / nthd;
+
+      std::vector<uint64_t> local_runs;
+      local_runs.reserve(end - begin);
+      for(size_t i = begin; i < end; i++) {
+        local_runs.push_back(runs[i]);
+      }
+      ready.fetch_add(1);
+      while(ready.load() != nthd);
+
       Timer<> timer;
       timer.start();
-      size_t start = tid * run_size / nthd, size = run_size / nthd;
-      uint64_t key, opcnt = 0;
+
+      uint64_t opcnt = 0, size = local_runs.size();
       while(true) {
-        key = runs[start + opcnt % size];
+        uint64_t key = local_runs[opcnt % size];
         int count = tree->scan(key, scan_size);
         if(count < 0) {
           std::cout << "\n-- tid: " << tid << ", scan error" << std::endl;
           exit(-1);
         }
-        if(opcnt++ % 10000 == 0 && timer.duration_s() > run_time) break;
+        if(opcnt++ % 10000 == 0 && terminate.load()) break;
       }
       long drt = timer.duration_us();
       std::lock_guard<std::mutex> guard(lock);
       tpt.push_back(double(opcnt) / drt);
     }, tid));
   }
+
+  termination();
   for(int tid = 0; tid < nthd; tid++) {
     workers[tid].join();
     scan_tpt += tpt[tid];

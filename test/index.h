@@ -10,15 +10,15 @@ class Index {
 
   virtual std::string index_type() = 0;
 
-  virtual void insert(K& key, V value) = 0;
+  virtual void insert(const K& key, V value) = 0;
 
-  virtual void update(K& key, V value) = 0;
+  virtual void update(const K& key, V value) = 0;
 
-  virtual void remove(K& key) = 0;
+  virtual void remove(const K& key) = 0;
 
-  virtual bool lookup(K& key, V& value) = 0;
+  virtual bool lookup(const K& key, V& value) = 0;
 
-  virtual int scan(K& key, int num) = 0;
+  virtual int scan(const K& key, int num) = 0;
 };
 
 enum INDEX_TYPE {
