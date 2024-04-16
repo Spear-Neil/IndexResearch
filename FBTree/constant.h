@@ -17,8 +17,10 @@ struct Constant;
 
 template<>
 struct Constant<String> {
-  static constexpr int kNodeSize = Config::kNodeSize;
-  static constexpr int kMergeSize = Config::kMergeSize;
+  static constexpr int kInnerSize = Config::kInnerSize;
+  static constexpr int kLeafSize = Config::kLeafSize;
+  static constexpr int kInnerMergeSize = Config::kInnerMergeSize;
+  static constexpr int kLeafMergeSize = Config::kLeafMergeSize;
   static constexpr int kFeatureSize = Config::kFeatureSize;
 
   static void node_parameter();
@@ -26,8 +28,10 @@ struct Constant<String> {
 
 template<>
 struct Constant<uint64_t> {
-  static constexpr int kNodeSize = Config::kNodeSize;
-  static constexpr int kMergeSize = Config::kMergeSize;
+  static constexpr int kInnerSize = Config::kInnerSize;
+  static constexpr int kLeafSize = Config::kLeafSize;
+  static constexpr int kInnerMergeSize = Config::kInnerMergeSize;
+  static constexpr int kLeafMergeSize = Config::kLeafMergeSize;
   static constexpr int kFeatureSize = sizeof(uint64_t);
 
   static void node_parameter();
@@ -37,8 +41,10 @@ struct Constant<uint64_t> {
 
 template<>
 struct Constant<int64_t> {
-  static constexpr int kNodeSize = Config::kNodeSize;
-  static constexpr int kMergeSize = Config::kMergeSize;
+  static constexpr int kInnerSize = Config::kInnerSize;
+  static constexpr int kLeafSize = Config::kLeafSize;
+  static constexpr int kInnerMergeSize = Config::kInnerMergeSize;
+  static constexpr int kLeafMergeSize = Config::kLeafMergeSize;
   static constexpr int kFeatureSize = sizeof(int64_t);
 
   static void node_parameter();
@@ -50,8 +56,10 @@ struct Constant<int64_t> {
 
 template<>
 struct Constant<uint32_t> {
-  static constexpr int kNodeSize = Config::kNodeSize;
-  static constexpr int kMergeSize = Config::kMergeSize;
+  static constexpr int kInnerSize = Config::kInnerSize;
+  static constexpr int kLeafSize = Config::kLeafSize;
+  static constexpr int kInnerMergeSize = Config::kInnerMergeSize;
+  static constexpr int kLeafMergeSize = Config::kLeafMergeSize;
   static constexpr int kFeatureSize = sizeof(uint32_t);
 
   static void node_parameter();
@@ -61,8 +69,10 @@ struct Constant<uint32_t> {
 
 template<>
 struct Constant<int32_t> {
-  static constexpr int kNodeSize = Config::kNodeSize;
-  static constexpr int kMergeSize = Config::kMergeSize;
+  static constexpr int kInnerSize = Config::kInnerSize;
+  static constexpr int kLeafSize = Config::kLeafSize;
+  static constexpr int kInnerMergeSize = Config::kInnerMergeSize;
+  static constexpr int kLeafMergeSize = Config::kLeafMergeSize;
   static constexpr int kFeatureSize = sizeof(int32_t);
 
   static void node_parameter();
@@ -74,8 +84,10 @@ struct Constant<int32_t> {
 
 template<>
 struct Constant<float> {
-  static constexpr int kNodeSize = Config::kNodeSize;
-  static constexpr int kMergeSize = Config::kMergeSize;
+  static constexpr int kInnerSize = Config::kInnerSize;
+  static constexpr int kLeafSize = Config::kLeafSize;
+  static constexpr int kInnerMergeSize = Config::kInnerMergeSize;
+  static constexpr int kLeafMergeSize = Config::kLeafMergeSize;
   static constexpr int kFeatureSize = sizeof(float);
 
   static_assert(kFeatureSize == 4);
@@ -85,8 +97,10 @@ struct Constant<float> {
 
 template<>
 struct Constant<double> {
-  static constexpr int kNodeSize = Config::kNodeSize;
-  static constexpr int kMergeSize = Config::kMergeSize;
+  static constexpr int kInnerSize = Config::kInnerSize;
+  static constexpr int kLeafSize = Config::kLeafSize;
+  static constexpr int kInnerMergeSize = Config::kInnerMergeSize;
+  static constexpr int kLeafMergeSize = Config::kLeafMergeSize;
   static constexpr int kFeatureSize = sizeof(double);
 
   static_assert(kFeatureSize == 8);
@@ -95,38 +109,45 @@ struct Constant<double> {
 };
 
 inline void Constant<String>::node_parameter() {
-  std::cout << "-- node parameter: compare mode:" << compare_mode() << ", node size:" << kNodeSize
-            << ", merge size:" << kMergeSize << ", feature size:" << kFeatureSize << std::endl;
+  std::cout << "-- node parameter: compare mode:" << compare_mode() << ", inner node size:" << kInnerSize
+            << ", leaf node size:" << kLeafSize << ", inner merge size:" << kInnerMergeSize << ", leaf merge size:"
+            << kLeafMergeSize << ", feature size:" << kFeatureSize << std::endl;
 }
 
 inline void Constant<uint64_t>::node_parameter() {
-  std::cout << "-- node parameter: compare mode:" << compare_mode() << ", node size:" << kNodeSize
-            << ", merge size:" << kMergeSize << ", feature size:" << kFeatureSize << std::endl;
+  std::cout << "-- node parameter: compare mode:" << compare_mode() << ", inner node size:" << kInnerSize
+            << ", leaf node size:" << kLeafSize << ", inner merge size:" << kInnerMergeSize << ", leaf merge size:"
+            << kLeafMergeSize << ", feature size:" << kFeatureSize << std::endl;
 }
 
 inline void Constant<int64_t>::node_parameter() {
-  std::cout << "-- node parameter: compare mode:" << compare_mode() << ", node size:" << kNodeSize
-            << ", merge size:" << kMergeSize << ", feature size:" << kFeatureSize << std::endl;
+  std::cout << "-- node parameter: compare mode:" << compare_mode() << ", inner node size:" << kInnerSize
+            << ", leaf node size:" << kLeafSize << ", inner merge size:" << kInnerMergeSize << ", leaf merge size:"
+            << kLeafMergeSize << ", feature size:" << kFeatureSize << std::endl;
 }
 
 inline void Constant<uint32_t>::node_parameter() {
-  std::cout << "-- node parameter: compare mode:" << compare_mode() << ", node size:" << kNodeSize
-            << ", merge size:" << kMergeSize << ", feature size:" << kFeatureSize << std::endl;
+  std::cout << "-- node parameter: compare mode:" << compare_mode() << ", inner node size:" << kInnerSize
+            << ", leaf node size:" << kLeafSize << ", inner merge size:" << kInnerMergeSize << ", leaf merge size:"
+            << kLeafMergeSize << ", feature size:" << kFeatureSize << std::endl;
 }
 
 inline void Constant<int32_t>::node_parameter() {
-  std::cout << "-- node parameter: compare mode:" << compare_mode() << ", node size:" << kNodeSize
-            << ", merge size:" << kMergeSize << ", feature size:" << kFeatureSize << std::endl;
+  std::cout << "-- node parameter: compare mode:" << compare_mode() << ", inner node size:" << kInnerSize
+            << ", leaf node size:" << kLeafSize << ", inner merge size:" << kInnerMergeSize << ", leaf merge size:"
+            << kLeafMergeSize << ", feature size:" << kFeatureSize << std::endl;
 }
 
 inline void Constant<float>::node_parameter() {
-  std::cout << "-- node parameter: compare mode:" << compare_mode() << ", node size:" << kNodeSize
-            << ", merge size:" << kMergeSize << ", feature size:" << kFeatureSize << std::endl;
+  std::cout << "-- node parameter: compare mode:" << compare_mode() << ", inner node size:" << kInnerSize
+            << ", leaf node size:" << kLeafSize << ", inner merge size:" << kInnerMergeSize << ", leaf merge size:"
+            << kLeafMergeSize << ", feature size:" << kFeatureSize << std::endl;
 }
 
 inline void Constant<double>::node_parameter() {
-  std::cout << "-- node parameter: compare mode:" << compare_mode() << ", node size:" << kNodeSize
-            << ", merge size:" << kMergeSize << ", feature size:" << kFeatureSize << std::endl;
+  std::cout << "-- node parameter: compare mode:" << compare_mode() << ", inner node size:" << kInnerSize
+            << ", leaf node size:" << kLeafSize << ", inner merge size:" << kInnerMergeSize << ", leaf merge size:"
+            << kLeafMergeSize << ", feature size:" << kFeatureSize << std::endl;
 }
 
 /* 1) all base type will be converted to unsigned type, because unsigned type

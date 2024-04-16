@@ -27,8 +27,8 @@ namespace FeatureBTree {
 
 template<typename K>
 class alignas(Config::kAlignSize) InnerNode {
-  static constexpr int kNodeSize = Constant<K>::kNodeSize;
-  static constexpr int kMergeSize = Constant<K>::kMergeSize;
+  static constexpr int kNodeSize = Constant<K>::kInnerSize;
+  static constexpr int kMergeSize = Constant<K>::kInnerMergeSize;
   static constexpr int kFeatureSize = Constant<K>::kFeatureSize;
   static constexpr int kBitCnt = 64; // bits number of bitmap
 
@@ -607,8 +607,8 @@ class alignas(Config::kAlignSize) InnerNode {
 
 template<>
 class alignas(Config::kAlignSize) InnerNode<String> {
-  static constexpr int kNodeSize = Constant<String>::kNodeSize;
-  static constexpr int kMergeSize = Constant<String>::kMergeSize;
+  static constexpr int kNodeSize = Constant<String>::kInnerSize;
+  static constexpr int kMergeSize = Constant<String>::kInnerMergeSize;
   static constexpr int kFeatureSize = Constant<String>::kFeatureSize;
   static constexpr int kEmbedPrSize = 224; // length of embedded prefix
   static constexpr int kBitCnt = 64; // bits number of bitmap

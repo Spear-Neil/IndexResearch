@@ -27,8 +27,8 @@ namespace FeatureBTree {
 
 template<typename K, typename V>
 class alignas(Config::kAlignSize) LeafNode {
-  static constexpr int kNodeSize = Constant<K>::kNodeSize;
-  static constexpr int kMergeSize = Constant<K>::kMergeSize;
+  static constexpr int kNodeSize = Constant<K>::kLeafSize;
+  static constexpr int kMergeSize = Constant<K>::kLeafMergeSize;
   static constexpr std::memory_order load_order = std::memory_order_acquire;
   static constexpr std::memory_order store_order = std::memory_order_release;
   typedef FeatureBTree::KVPair<K, V> KVPair;
@@ -482,8 +482,8 @@ class alignas(Config::kAlignSize) LeafNode {
 
 template<typename V>
 class alignas(Config::kAlignSize) LeafNode<String, V> {
-  static constexpr int kNodeSize = Constant<String>::kNodeSize;
-  static constexpr int kMergeSize = Constant<String>::kMergeSize;
+  static constexpr int kNodeSize = Constant<String>::kLeafSize;
+  static constexpr int kMergeSize = Constant<String>::kLeafMergeSize;
   static constexpr std::memory_order load_order = std::memory_order_acquire;
   static constexpr std::memory_order store_order = std::memory_order_release;
   typedef FeatureBTree::KVPair<String, V> KVPair;

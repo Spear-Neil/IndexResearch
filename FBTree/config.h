@@ -14,10 +14,12 @@ struct Config {
    * string key, the feature size of basic type key is fixed */
   static constexpr int kFeatureSize = 4;
   /* the number of keys in inner/leaf node, 16/32/64 */
-  static constexpr int kNodeSize = 64;
+  static constexpr int kInnerSize = 64;
+  static constexpr int kLeafSize = 64;
   /* the merge threshold, if the number of keys in current node
    * and its sibling node is lss than MERGE_SIZE, merge the two node */
-  static constexpr int kMergeSize = kNodeSize / 2;
+  static constexpr int kInnerMergeSize = kInnerSize / 2;
+  static constexpr int kLeafMergeSize = kLeafSize / 2;
   /* the memory alignment requirement of inner node and leaf node */
   static constexpr int kAlignSize = 32;
   /* prefetch inner node and leaf node before access node */
@@ -39,9 +41,21 @@ inline std::string compare_mode() {
 
 static_assert(Config::kFeatureSize > 0);
 
-static_assert((Config::kNodeSize == 16 && Config::kCmpMode == SIMD128)
-              || (Config::kNodeSize == 32 && Config::kCmpMode != SIMD512)
-              || Config::kNodeSize == 64);
+static_assert((Config::kInnerSize == 16 && Config::kCmpMode == SIMD128)
+              || (Config::kInnerSize == 32 && Config::kCmpMode != SIMD512)
+              || Config::kInnerSize == 64);
+
+static_assert((Config::kLeafSize == 16 && Config::kCmpMode == SIMD128)
+              || (Config::kLeafSize == 32 && Config::kCmpMode != SIMD512)
+              || Config::kLeafSize == 64);
+
+static_assert(Config::kInnerMergeSize > 0 &&
+              Config::kInnerMergeSize < Config::kInnerSize);
+
+static_assert(Config::kLeafMergeSize > 0 &&
+              Config::kLeafMergeSize < Config::kLeafSize);
+
+static_assert(Config::kAlignSize == 32 || Config::kAlignSize == 64);
 
 #ifndef AVX512BW_ENABLE
 static_assert(Config::kCmpMode != SIMD512);

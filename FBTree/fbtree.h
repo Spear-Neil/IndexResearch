@@ -216,7 +216,7 @@ class alignas(64) FBTree {
         }
       }
     }
-    stat["load factor"] = stat["kv pair num"] / (stat["leaf num"] * Constant<K>::kNodeSize);
+    stat["load factor"] = stat["kv pair num"] / (stat["leaf num"] * Constant<K>::kLeafSize);
 
     std::cout << "-- FBTree statistics" << std::endl;
     for(auto item : stat) {
@@ -668,7 +668,7 @@ class alignas(64) FBTree<String, V> {
         }
       }
     }
-    stat["load factor"] = stat["kv pair num"] / (stat["leaf num"] * Constant<String>::kNodeSize);
+    stat["load factor"] = stat["kv pair num"] / (stat["leaf num"] * Constant<String>::kLeafSize);
 
     std::cout << "-- FBTree statistics" << std::endl;
     for(auto item : stat) {
