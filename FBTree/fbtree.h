@@ -23,6 +23,7 @@ class alignas(64) FBTree {
   typedef FeatureBTree::LeafNode<K, V> LeafNode;
   typedef FeatureBTree::InnerNode<K> InnerNode;
   static constexpr int kMaxHeight = 13;
+  static constexpr int kPrefetchSize = 2;
 
   void* root_;                  // root node
   int tree_depth_;              // tree depth/height
@@ -106,7 +107,7 @@ class alignas(64) FBTree {
 
   void node_prefetch(void* node) {
     if(Config::kNodePrefetch) {
-      for(int i = 0; i < Config::kPrefetchSize; i++)
+      for(int i = 0; i < kPrefetchSize; i++)
         prefetcht0((char*) node + i * 64);
     }
   }

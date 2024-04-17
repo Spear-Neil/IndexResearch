@@ -24,7 +24,7 @@ struct Config {
   static constexpr int kAlignSize = 32;
   /* prefetch inner node and leaf node before access node */
   static constexpr bool kNodePrefetch = true;
-  /* node prefetch size, default 4 cache line */
+  /* node prefetch size, default 4 cache line (for string key) */
   static constexpr int kPrefetchSize = 4;
 };
 
