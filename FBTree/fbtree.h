@@ -673,7 +673,7 @@ class alignas(64) FBTree<String, V> {
 
     std::cout << "-- FBTree statistics" << std::endl;
     for(auto item : stat) {
-      if(item.first == "index size") {
+      if(item.first == "index size" || item.first == "anchor size") {
         size_t GB = 1024ul * 1024 * 1024;
         std::cout << "  -- " << item.first << ": " << item.second / GB << " GB" << std::endl;
       } else {

@@ -612,6 +612,7 @@ class alignas(Config::kAlignSize) LeafNode<String, V> {
     stat["index size"] += sizeof(LeafNode);
     if(control_.has_sibling()) {
       stat["index size"] += high_key_->len + sizeof(String);
+      stat["anchor size"] += high_key_->len + sizeof(String);
     }
     stat["leaf num"] += 1;
     stat["kv pair num"] += popcount(bitmap_);
