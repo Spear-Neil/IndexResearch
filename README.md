@@ -13,8 +13,8 @@ It highlights:
 * No comparison overhead with high_key (B-link-Tree in contrast)
 * No restarts from root node (optimistic lock coupling in contrast)
 
-# [Hightlight and key features of FBTree](FBTree-analysis.pdf)
-| Hightlight and key features of FBTree | 
+# [Highlight and key features of FBTree](FBTree-analysis.pdf)
+| Highlight and key features of FBTree | 
 | ----------------------------- | 
 | ![1](FBTree-analysis-1.png) |
 | ![2](FBTree-analysis-2.png) |
