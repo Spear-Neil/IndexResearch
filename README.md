@@ -13,6 +13,10 @@ It highlights:
 * No comparison overhead with high_key (B-link-Tree in contrast)
 * No restarts from root node (optimistic lock coupling in contrast)
 
+# [Hightlight and key features of FBTree](FBTree-analysis.pdf)
+![](FBTree-analysis-1.png)
+![](FBTree-analysis-1.png)
+
 # Index Structures
 There is an example in each index directory.
 * [ARTOLC](https://github.com/wangziqi2016/index-microbench.git)
