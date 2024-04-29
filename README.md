@@ -14,8 +14,11 @@ It highlights:
 * No restarts from root node (optimistic lock coupling in contrast)
 
 # [Hightlight and key features of FBTree](FBTree-analysis.pdf)
-![](FBTree-analysis-1.png)
-![](FBTree-analysis-1.png)
+| Hightlight and key features of FBTree | 
+| ----------------------------- | 
+| ![1](FBTree-analysis-1.png) |
+| ![2](FBTree-analysis-2.png) |
+
 
 # Index Structures
 There is an example in each index directory.
