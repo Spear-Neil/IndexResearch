@@ -70,7 +70,6 @@ int main(int argc, char* argv[]) {
             << ", scan size: " << scan_size << ", run type: " << (run_type ? "mono" : "random") << std::endl;
 
   PinningMap pinning;
-  pinning.numa_set_localalloc();
   pinning.pinning_thread(0, 0, pthread_self());
 
   Timer<> timer;

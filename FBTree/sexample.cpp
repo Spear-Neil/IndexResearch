@@ -9,7 +9,6 @@ using util::Timer;
 
 void simple_test(size_t nkey, int nthd, bool shuffle) {
   PinningMap pinning;
-  pinning.numa_set_localalloc();
   pinning.pinning_thread(0, 0, pthread_self());
 
   FBTree<std::string, uint64_t> tree;
