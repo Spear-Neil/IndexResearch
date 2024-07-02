@@ -752,7 +752,7 @@ class alignas(64) FBTree<String, V> {
       unlatch_exclusive(current);
 
       // inner node insertion
-      rnode = inner(work)->insert(mid, current, rnode, index);
+      rnode = inner(work)->insert(mid, current, rnode, index, epoch_);
       if(rootid == 1) { control(current)->end_splitting(); }
       current = work;
     }
@@ -841,12 +841,12 @@ class alignas(64) FBTree<String, V> {
       }
       if(work != root_) unlatch_exclusive(current);
 
-      if(merged) merged = inner(work)->remove(mid, up, index);
-      else up = inner(work)->anchor_update(mid, index);
+      if(merged) merged = inner(work)->remove(mid, up, index, epoch_);
+      else up = inner(work)->anchor_update(mid, index, epoch_);
 
       if(work == root_) { // work has been latched
         merged = nullptr, up = false;
-        next = inner(work)->root_remove();
+        next = inner(work)->root_remove(epoch_);
         if(next) {
           root_ = next, tree_depth_--;
           epoch_->retire(work);

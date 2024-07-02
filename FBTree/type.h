@@ -76,6 +76,57 @@ String* make_string(char* str, int len) {
   return ret;
 }
 
+
+/* store anchor keys in a contiguous memory block */
+class Extent {
+  int mlen_;   // total size of available space
+  int used_;   // used size of available space
+  int free_;   // freed size (anchor remove/update)
+  int huge_;   // offset, points to huge prefix
+  char mem_[]; // available space
+
+ public:
+  void init(int len) {
+    mlen_ = len - sizeof(Extent);
+    used_ = 0, free_ = 0, huge_ = 0;
+  }
+
+  int size() { return mlen_ + sizeof(Extent); }
+
+  int used() { return used_ - free_ + sizeof(Extent); }
+
+  int left() { return mlen_ - used_; }
+
+  String* huge() { return (String*) (mem_ + huge_); }
+
+  void huge(String* key) {
+    assert((ptrdiff_t(key) < ptrdiff_t(mem_ + used_)
+            && ptrdiff_t(key) >= ptrdiff_t(mem_)) || key == nullptr);
+    huge_ = ptrdiff_t(key) - ptrdiff_t(mem_);
+  }
+
+  String* make_anchor(String* key) {
+    // contiguously malloc a memory block
+    if(mlen_ - used_ >= key->len + sizeof(String)) {
+      String* ret = (String*) (mem_ + used_);
+      ret->len = key->len;
+      memcpy(ret->str, key->str, key->len);
+      used_ += key->len + sizeof(String);
+      return ret;
+    }
+    // no more space, require realloc
+    return nullptr;
+  }
+
+  void ruin_anchor(String* key) {
+    assert(ptrdiff_t(key) < ptrdiff_t(mem_ + used_)
+             && ptrdiff_t(key) >= ptrdiff_t(mem_));
+    // only record how many bytes are freed, because these bytes
+    // may be accessed by other threads, realloc if necessary
+    free_ += key->len + sizeof(String);
+  }
+};
+
 }
 
 #endif //INDEXRESEARCH_TYPE_H

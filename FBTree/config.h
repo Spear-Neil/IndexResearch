@@ -26,6 +26,8 @@ struct Config {
   static constexpr bool kNodePrefetch = true;
   /* node prefetch size, default 4 cache line (for string key) */
   static constexpr int kPrefetchSize = 4;
+  /* the initial extent size, only valid if defined CLUSTERED_ANCHORS */
+  static constexpr int kExtentSize = 2048;
 };
 
 inline std::string compare_mode() {
@@ -56,6 +58,8 @@ static_assert(Config::kLeafMergeSize > 0 &&
               Config::kLeafMergeSize < Config::kLeafSize);
 
 static_assert(Config::kAlignSize == 32 || Config::kAlignSize == 64);
+
+static_assert(Config::kExtentSize % 2048 == 0);
 
 #ifndef AVX512BW_ENABLE
 static_assert(Config::kCmpMode != SIMD512);
