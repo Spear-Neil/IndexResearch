@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cassert>
 #include <cstring>
+#include "config.h"
 #include "strutil.h"
 
 using util::compare;
@@ -87,21 +88,25 @@ class Extent {
 
  public:
   void init(int len) {
+    assert(len % Config::kExtentSize == 0);
     mlen_ = len - sizeof(Extent);
     used_ = 0, free_ = 0, huge_ = 0;
   }
 
+  // total size of extent, metadata and available space
   int size() { return mlen_ + sizeof(Extent); }
 
+  // used size of extent, metadata and valid anchors
   int used() { return used_ - free_ + sizeof(Extent); }
 
+  // left size of available space
   int left() { return mlen_ - used_; }
 
   String* huge() { return (String*) (mem_ + huge_); }
 
   void huge(String* key) {
     assert((ptrdiff_t(key) < ptrdiff_t(mem_ + used_)
-            && ptrdiff_t(key) >= ptrdiff_t(mem_)) || key == nullptr);
+            && ptrdiff_t(key) >= ptrdiff_t(mem_)));
     huge_ = ptrdiff_t(key) - ptrdiff_t(mem_);
   }
 

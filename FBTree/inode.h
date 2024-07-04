@@ -613,6 +613,7 @@ class alignas(Config::kAlignSize) InnerNode<String> {
   static constexpr int kNodeSize = Constant<String>::kInnerSize;
   static constexpr int kMergeSize = Constant<String>::kInnerMergeSize;
   static constexpr int kFeatureSize = Constant<String>::kFeatureSize;
+  static constexpr bool kExtentOpt = Config::kExtentOpt;
   static constexpr int kExtentSize = Config::kExtentSize;
   static constexpr int kEmbedPrSize = 224; // length of embedded prefix
   static constexpr int kBitCnt = 64; // bits number of bitmap
@@ -621,16 +622,16 @@ class alignas(Config::kAlignSize) InnerNode<String> {
    * excess memory for embedded prefix: the default size of embedded prefix is 224,
    * 1536 - 32 - 4 * 64 - 8 * 64 - 8 * 64 = 224, feature size: 4, node size: 64
    * 896 - 32 - 4 * 32 - 8 * 32 - 8 * 32 = 224, feature size: 4, node size: 32 */
-
-  Control control_; // synchronization, memory/compiler order
-  int knum_;        // the number of anchor/separator keys
-  int plen_;        // the length of prefix, embed if possible
-#ifdef CLUSTERED_ANCHORS /* store anchors in inner nodes for better performance */
-  Extent* extent_;  // contiguous memory block storing anchors/prefix
-#else /* anchors are actually stored in leaf nodes, in inner nodes only pointers */
-  String* huge_;    // prefix can't be embedded, points to first anchor
-#endif
-  void* next_;      // sibling or last child (right-most node)
+  /* if kExtentOpt(false), anchors are actually stored in leaf nodes, inner nodes only
+   * store pointers to anchors, else store anchors with contiguous memory in extent */
+  Control control_;  // synchronization, memory/compiler order
+  int knum_;         // the number of anchor/separator keys
+  int plen_;         // the length of prefix, embed if possible
+  union {
+    Extent* extent_; // contiguous memory block storing anchors/prefix
+    String* huge_;   // prefix can't be embedded, points to first anchor
+  };
+  void* next_;       // sibling or last child (right-most node)
 
   char features_[kFeatureSize][kNodeSize];
   char tiny_[kEmbedPrSize];    // prefix that can be embedded
@@ -672,17 +673,11 @@ class alignas(Config::kAlignSize) InnerNode<String> {
     if(cmps <= kEmbedPrSize) { // embedded prefix
       prefetcht0(tiny_); // prefetch a cache line
       pcmp = memcmp(key.str, tiny_, cmps);
-#ifdef CLUSTERED_ANCHORS
-    } else if(extent_ != nullptr && extent_->huge()->len >= cmps) {
-      // ensure no segmentation fault
+    } else if(!kExtentOpt && huge_->len >= cmps) {
+      pcmp = memcmp(key.str, huge_->str, cmps);
+    } else if(kExtentOpt && extent_->huge()->len >= cmps) {
       pcmp = memcmp(key.str, extent_->huge()->str, cmps);
     } // current node has modified by others, retry
-#else
-    } else if(huge_ != nullptr && huge_->len >= cmps) {
-      // ensure no segmentation fault
-      pcmp = memcmp(key.str, huge_->str, cmps);
-    } // current node has modified by others, retry
-#endif
 
     // key.len < plen: can't be equal
     if(!pcmp && cmps < plen) return -1;
@@ -759,8 +754,6 @@ class alignas(Config::kAlignSize) InnerNode<String> {
     }
   }
 
-#ifdef CLUSTERED_ANCHORS
-
   /* adjust the size and arrangement of extent, required memory length */
   void extent_resize(Epoch* epoch, int rlen) {
     if(extent_->left() < rlen) {
@@ -772,7 +765,7 @@ class alignas(Config::kAlignSize) InnerNode<String> {
         anchors_[kid] = ext->make_anchor(anchors_[kid]);
         assert(anchors_[kid] != nullptr);
       }
-      ext->huge(anchors_[0]);
+      if(knum_ > 0) ext->huge(anchors_[0]);
       epoch->retire(extent_);
       extent_ = ext;
     }
@@ -796,8 +789,6 @@ class alignas(Config::kAlignSize) InnerNode<String> {
     extent_->ruin_anchor(key);
   }
 
-#endif
-
   void content_rebuild() {
     /* all keys are sorted, the node prefix is equal to the longest
      * common prefix of the first and the last key; new node: prefix
@@ -807,11 +798,8 @@ class alignas(Config::kAlignSize) InnerNode<String> {
     int fs = anchors_[0]->len, ls = anchors_[knum_ - 1]->len;
     char* fk = anchors_[0]->str, * lk = anchors_[knum_ - 1]->str;
     plen_ = common_prefix(fk, fs, lk, ls);
-#ifdef CLUSTERED_ANCHORS
-    extent_->huge(anchors_[0]);
-#else
-    huge_ = anchors_[0];
-#endif
+    if(!kExtentOpt) huge_ = anchors_[0];
+    else extent_->huge(anchors_[0]);
     if(plen_ <= kEmbedPrSize) { memcpy(tiny_, fk, plen_); }
 
     for(int kid = 0; kid < knum_; kid++) {
@@ -834,9 +822,7 @@ class alignas(Config::kAlignSize) InnerNode<String> {
 
     if(index == kNodeSize) { // index == kNodeSize can only exist in the rightmost node
       // the rightmost node without sibling and key is greater than all keys
-#ifdef CLUSTERED_ANCHORS
-      key = make_anchor(epoch, key);
-#endif
+      if(kExtentOpt) key = rnode->make_anchor(epoch, key);
       rnode->anchors_[0] = key;
       rnode->children_[0] = lchild;
       rnode->next_ = rchild;
@@ -846,25 +832,23 @@ class alignas(Config::kAlignSize) InnerNode<String> {
       key = anchors_[kNodeSize - 1];
     } else if(index < kNodeSize / 2) {
       // move right half separators and children to right node
-#ifdef CLUSTERED_ANCHORS
-      // allocate a large enough memory block to prevent resize
-      rnode->extent_resize(epoch, extent_->used());
-      for(int kid = kNodeSize / 2; kid < kNodeSize; kid++) {
-        String* k = rnode->make_anchor(epoch, anchors_[kid]);
-        ruin_anchor(epoch, anchors_[kid]);
-        rnode->anchors_[kid - kNodeSize / 2] = k;
+      if(kExtentOpt) {
+        // allocate a large enough memory block to prevent resize
+        rnode->extent_resize(epoch, extent_->used());
+        for(int kid = kNodeSize / 2; kid < kNodeSize; kid++) {
+          String* k = rnode->make_anchor(epoch, anchors_[kid]);
+          ruin_anchor(epoch, anchors_[kid]);
+          rnode->anchors_[kid - kNodeSize / 2] = k;
+        }
+      } else {
+        src = anchors_ + kNodeSize / 2, dst = rnode->anchors_;
+        memmove64(src, dst, kNodeSize / 2, true);
       }
-#else
-      src = anchors_ + kNodeSize / 2, dst = rnode->anchors_;
-      memmove64(src, dst, kNodeSize / 2, true);
-#endif
       src = children_ + kNodeSize / 2, dst = rnode->children_;
       memmove64(src, dst, kNodeSize / 2, true);
 
       //insert lhigh to left inner node
-#ifdef CLUSTERED_ANCHORS
-      knum_ = kNodeSize / 2, key = make_anchor(epoch, key);
-#endif
+      if(kExtentOpt) { knum_ = kNodeSize / 2, key = make_anchor(epoch, key); }
       src = anchors_ + index, dst = anchors_ + index + 1;
       memmove64(src, dst, kNodeSize / 2 - index, false);
       src = children_ + index, dst = children_ + index + 1;
@@ -881,26 +865,26 @@ class alignas(Config::kAlignSize) InnerNode<String> {
       key = anchors_[kNodeSize / 2];
     } else { // kNodeSize / 2 <= index < kNodeSize
       int ncp = index - kNodeSize / 2;
-#ifdef CLUSTERED_ANCHORS
-      for(int kid = kNodeSize / 2; kid < kNodeSize; kid++) {
-        if(kid == index) {
-          key = rnode->make_anchor(epoch, key);
-          rnode->anchors_[index - kNodeSize / 2] = key;
+      if(kExtentOpt) {
+        for(int kid = kNodeSize / 2; kid < kNodeSize; kid++) {
+          if(kid == index) {
+            key = rnode->make_anchor(epoch, key);
+            rnode->anchors_[index - kNodeSize / 2] = key;
+            rnode->knum_ += 1;
+          }
+          String* k = rnode->make_anchor(epoch, anchors_[kid]);
+          ruin_anchor(epoch, anchors_[kid]);
+          if(kid < index) rnode->anchors_[kid - kNodeSize / 2] = k;
+          else rnode->anchors_[kid - kNodeSize / 2 + 1] = k;
           rnode->knum_ += 1;
         }
-        String* k = rnode->make_anchor(epoch, anchors_[kid]);
-        ruin_anchor(epoch, anchors_[kid]);
-        if(kid < index) rnode->anchors_[kid - kNodeSize / 2] = k;
-        else rnode->anchors_[kid - kNodeSize / 2 + 1] = k;
-        rnode->knum_ += 1;
+      } else {
+        src = anchors_ + kNodeSize / 2, dst = rnode->anchors_;
+        memmove64(src, dst, ncp, true);
+        src = anchors_ + index, dst = rnode->anchors_ + ncp + 1;
+        memmove64(src, dst, kNodeSize - index, true);
+        rnode->anchors_[index - kNodeSize / 2] = key;
       }
-#else
-      src = anchors_ + kNodeSize / 2, dst = rnode->anchors_;
-      memmove64(src, dst, ncp, true);
-      src = anchors_ + index, dst = rnode->anchors_ + ncp + 1;
-      memmove64(src, dst, kNodeSize - index, true);
-      rnode->anchors_[index - kNodeSize / 2] = key;
-#endif
 
       src = children_ + kNodeSize / 2, dst = rnode->children_;
       memmove64(src, dst, ncp + 1, true);
@@ -936,25 +920,25 @@ class alignas(Config::kAlignSize) InnerNode<String> {
           merged = rnode, key = anchors_[knum_ - 1];
 
           // move separators in rnode to current node
-#ifdef CLUSTERED_ANCHORS
-          extent_resize(epoch, rnode->extent_->used());
-          for(int kid = 0; kid < rnkey; kid++) {
-            anchors_[knum_++] = make_anchor(epoch, rnode->anchors_[kid]);
-            rnode->ruin_anchor(epoch, rnode->anchors_[kid]);
+          if(kExtentOpt) {
+            extent_resize(epoch, rnode->extent_->used());
+            for(int kid = 0; kid < rnkey; kid++) {
+              anchors_[knum_++] = make_anchor(epoch, rnode->anchors_[kid]);
+              rnode->ruin_anchor(epoch, rnode->anchors_[kid]);
+            }
+            void* src = rnode->children_;
+            void* dst = children_ + knum_ - rnkey;
+            memmove64(src, dst, rnkey, true);
+            rnode->knum_ = 0, epoch->retire(rnode->extent_);
+          } else {
+            void* src = rnode->anchors_;
+            void* dst = anchors_ + knum_;
+            memmove64(src, dst, rnkey, true);
+            src = rnode->children_;
+            dst = children_ + knum_;
+            memmove64(src, dst, rnkey, true);
+            knum_ += rnkey, rnode->knum_ = 0;
           }
-          void* src = rnode->children_;
-          void* dst = children_ + knum_ - rnkey;
-          memmove64(src, dst, rnkey, true);
-          rnode->knum_ = 0, epoch->retire(rnode->extent_);
-#else
-          void* src = rnode->anchors_;
-          void* dst = anchors_ + knum_;
-          memmove64(src, dst, rnkey, true);
-          src = rnode->children_;
-          dst = children_ + knum_;
-          memmove64(src, dst, rnkey, true);
-          knum_ += rnkey, rnode->knum_ = 0;
-#endif
 
           content_rebuild();
           next_ = rnode->next_, rnode->next_ = this;
@@ -995,25 +979,25 @@ class alignas(Config::kAlignSize) InnerNode<String> {
          || rnkey == 0 || rnkey == 1) {
         merged = rnode; // border remove, so do not need to reset mid.
         // move right node key to current node
-#ifdef CLUSTERED_ANCHORS
-        knum_ -= 1, extent_resize(epoch, rnode->extent_->used());
-        for(int kid = 0; kid < rnkey; kid++) {
-          anchors_[knum_++] = make_anchor(epoch, rnode->anchors_[kid]);
-          rnode->ruin_anchor(epoch, rnode->anchors_[kid]);
+        if(kExtentOpt) {
+          knum_ -= 1, extent_resize(epoch, rnode->extent_->used());
+          for(int kid = 0; kid < rnkey; kid++) {
+            anchors_[knum_++] = make_anchor(epoch, rnode->anchors_[kid]);
+            rnode->ruin_anchor(epoch, rnode->anchors_[kid]);
+          }
+          void* src = rnode->children_ + 1;
+          void* dst = children_ + knum_ - rnkey + 1;
+          memmove64(src, dst, rnkey ? rnkey - 1 : 0, true);
+          rnode->knum_ = 0, epoch->retire(rnode->extent_);
+        } else {
+          void* src = rnode->anchors_;
+          void* dst = anchors_ + index;
+          memmove64(src, dst, rnkey, true);
+          src = rnode->children_ + 1;
+          dst = children_ + knum_;
+          memmove64(src, dst, rnkey ? rnkey - 1 : 0, true);
+          knum_ += rnkey - 1, rnode->knum_ = 0;
         }
-        void* src = rnode->children_ + 1;
-        void* dst = children_ + knum_ - rnkey + 1;
-        memmove64(src, dst, rnkey ? rnkey - 1 : 0, true);
-        rnode->knum_ = 0, epoch->retire(rnode->extent_);
-#else
-        void* src = rnode->anchors_;
-        void* dst = anchors_ + index;
-        memmove64(src, dst, rnkey, true);
-        src = rnode->children_ + 1;
-        dst = children_ + knum_;
-        memmove64(src, dst, rnkey ? rnkey - 1 : 0, true);
-        knum_ += rnkey - 1, rnode->knum_ = 0;
-#endif
         content_rebuild();
 
         // set meta information
@@ -1040,17 +1024,13 @@ class alignas(Config::kAlignSize) InnerNode<String> {
 
  public:
   InnerNode() : control_(false), knum_(0), plen_(0), next_(nullptr) {
-#ifdef CLUSTERED_ANCHORS
-    extent_ = (Extent*) malloc(Config::kExtentSize);
-    extent_->init(Config::kExtentSize);
-#endif
+    if(kExtentOpt) {
+      extent_ = (Extent*) malloc(Config::kExtentSize);
+      extent_->init(Config::kExtentSize);
+    }
   }
 
-  ~InnerNode() {
-#ifdef CLUSTERED_ANCHORS
-    free(extent_);
-#endif
-  }
+  ~InnerNode() { if(kExtentOpt) free(extent_); }
 
   void* sibling() {
     if(control_.has_sibling()) { return next_; }
@@ -1059,9 +1039,7 @@ class alignas(Config::kAlignSize) InnerNode<String> {
 
   void statistic(std::map<std::string, double>& stat) {
     stat["index size"] += sizeof(InnerNode);
-#ifdef CLUSTERED_ANCHORS
-    stat["index size"] += extent_->size();
-#endif
+    if(kExtentOpt) stat["index size"] += extent_->size();
     stat["inner num"] += 1;
   }
 
@@ -1208,9 +1186,7 @@ class alignas(Config::kAlignSize) InnerNode<String> {
     control_.update_version();
 
     if(knum_ < kNodeSize) {  // safe, insert key into current node
-#ifdef CLUSTERED_ANCHORS
-      key = make_anchor(epoch, key);
-#endif
+      if(kExtentOpt) key = make_anchor(epoch, key);
       void* src = anchors_ + index;
       void* dst = anchors_ + index + 1;
       memmove64(src, dst, knum_ - index, false);
@@ -1248,9 +1224,7 @@ class alignas(Config::kAlignSize) InnerNode<String> {
     CONDITION_ERROR(index < 0 || index >= knum_, "invalid index");
     control_.update_version(), up = false;
 
-#ifdef CLUSTERED_ANCHORS
-    ruin_anchor(epoch, anchors_[index]);
-#endif
+    if(kExtentOpt) ruin_anchor(epoch, anchors_[index]);
     if(index < knum_ - 1) {
       // knum is 2 at least, the merged node is in current node
       CONDITION_ERROR(knum_ < 2, "knum equals 2 at least");
@@ -1284,10 +1258,10 @@ class alignas(Config::kAlignSize) InnerNode<String> {
     CONDITION_ERROR(index < 0 || index >= knum_, "anchor update error");
     control_.update_version();
 
-#ifdef CLUSTERED_ANCHORS
-    key = make_anchor(epoch, key);
-    ruin_anchor(epoch, anchors_[index]);
-#endif
+    if(kExtentOpt) {
+      key = make_anchor(epoch, key);
+      ruin_anchor(epoch, anchors_[index]);
+    }
     anchors_[index] = key;
     if(index == 0 || index == knum_ - 1) {
       content_rebuild();
@@ -1304,9 +1278,7 @@ class alignas(Config::kAlignSize) InnerNode<String> {
 
   void* root_remove(Epoch* epoch) {
     if(knum_ == 0) {
-#ifdef CLUSTERED_ANCHORS
-      epoch->retire(extent_);
-#endif
+      if(kExtentOpt) epoch->retire(extent_);
       control_.set_delete();
       return next_; // the new root
     }

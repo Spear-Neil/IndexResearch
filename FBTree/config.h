@@ -26,7 +26,8 @@ struct Config {
   static constexpr bool kNodePrefetch = true;
   /* node prefetch size, default 4 cache line (for string key) */
   static constexpr int kPrefetchSize = 4;
-  /* the initial extent size, only valid if defined CLUSTERED_ANCHORS */
+  /* the initial extent size, valid if kExtentOpt(true) */
+  static constexpr bool kExtentOpt = false;
   static constexpr int kExtentSize = 2048;
 };
 
