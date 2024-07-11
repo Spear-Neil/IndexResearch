@@ -1,3 +1,9 @@
+/*
+ * Copyright (c) 2022, Chen Yuan <yuan.chen@whu.edu.cn>
+ *
+ * All rights reserved. No warranty, explicit or implicit, provided.
+ */
+
 #ifndef INDEXRESEARCH_TYPE_H
 #define INDEXRESEARCH_TYPE_H
 
@@ -53,10 +59,12 @@ struct String {
   }
 
   bool operator==(const String& k) {
+    if(len != k.len) return false;
     return !compare(str, len, (char*) k.str, k.len);
   }
 
   bool operator!=(const String& k) {
+    if(len != k.len) return true;
     return compare(str, len, (char*) k.str, k.len);
   }
 };

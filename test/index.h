@@ -2,19 +2,23 @@
 #define INDEXRESEARCH_INDEX_H
 
 #include <string>
+#include "../FBTree/type.h"
 
+/* for experiment, garbage collection is not considered; insert/update
+ * operations only modify the index, key-value is not considered; in
+ * addition, some index does not implement remove interface */
 template<typename K, typename V>
 class Index {
  public:
-  virtual ~Index() {};
+  using KVType = FeatureBTree::KVPair<K, V>;
+
+  virtual ~Index() = default;
 
   virtual std::string index_type() = 0;
 
-  virtual void insert(const K& key, V value) = 0;
+  virtual void insert(KVType* kv) = 0;
 
-  virtual void update(const K& key, V value) = 0;
-
-  virtual void remove(const K& key) = 0;
+  virtual void update(KVType* kv) = 0;
 
   virtual bool lookup(const K& key, V& value) = 0;
 

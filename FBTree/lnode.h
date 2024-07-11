@@ -1,3 +1,9 @@
+/*
+ * Copyright (c) 2022, Chen Yuan <yuan.chen@whu.edu.cn>
+ *
+ * All rights reserved. No warranty, explicit or implicit, provided.
+ */
+
 #ifndef INDEXRESEARCH_LNODE_H
 #define INDEXRESEARCH_LNODE_H
 
@@ -131,8 +137,7 @@ class alignas(Config::kAlignSize) LeafNode {
   }
 
  public:
-  LeafNode() : control_(true), bitmap_(0),
-               high_key_(0), sibling_(nullptr) {}
+  LeafNode() : control_(true), bitmap_(0), high_key_(0), sibling_(nullptr) {}
 
   ~LeafNode() {
     uint64_t mask = bitmap_;
@@ -585,8 +590,7 @@ class alignas(Config::kAlignSize) LeafNode<String, V> {
   }
 
  public:
-  LeafNode() : control_(true), bitmap_(0),
-               high_key_(nullptr), sibling_(nullptr) {}
+  LeafNode() : control_(true), bitmap_(0), high_key_(nullptr), sibling_(nullptr) {}
 
   ~LeafNode() {
     uint64_t mask = bitmap_;

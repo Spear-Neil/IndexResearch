@@ -2,9 +2,9 @@
 #include <limits>
 #include <atomic>
 #include <mutex>
+#include <csignal>
 
 #include "index.h"
-#include "../FBTree/type.h"
 #include "../ARTOLC/Tree.h"
 #include "hot/rowex/HOTRowex.hpp"
 #include "idx/contenthelpers/OptionalValue.hpp"
@@ -27,83 +27,60 @@
 #include "../GoogleBTree/btree_map.h"
 #include "../STX/tlx/tlx/container.hpp"
 
+using FeatureBTree::String;
+
 template<>
 class IndexART<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
   ART_OLC::Tree tree;
   Key max_key;
 
-  using pair = FeatureBTree::KVPair<uint64_t, uint64_t>;
-
  public:
-  IndexART() : tree([](TID tid, Key& key) { key.setInt(((pair*) tid)->key); }) {
+  IndexART() : tree([](TID tid, Key& key) { key.setInt(((KVType*) tid)->key); }) {
     max_key.setInt(std::numeric_limits<uint64_t>::max());
   }
 
-  ~IndexART() {}
+  ~IndexART() override {}
 
-  std::string index_type() { return "ART"; }
+  std::string index_type() override { return "ART"; }
 
-  void insert(const uint64_t& key, uint64_t value) {
+  void insert(KVType* kv) override {
     static thread_local auto t = tree.getThreadInfo();
-    void* tid = new pair{key, value};
-    Key k;
-    k.setInt(key);
-    tree.insert(k, (TID) tid, t);
+    Key k(kv->key);
+    tree.insert(k, (TID) kv, t);
   }
 
-  void update(const uint64_t& key, uint64_t value) {
-    static thread_local auto t = tree.getThreadInfo();
-    Key k;
-    k.setInt(key);
-    pair* tid = (pair*) tree.lookup(k, t);
-    if(tid != nullptr) {
-      ((std::atomic<uint64_t>&) tid->value).exchange(value);
-    }
+  void update(KVType* kv) override {
+    insert(kv);
   }
 
-  void remove(const uint64_t& key) {
+  bool lookup(const uint64_t& key, uint64_t& value) override {
     static thread_local auto t = tree.getThreadInfo();
-    Key k;
-    k.setInt(key);
-    TID tid = tree.lookup(k, t);
-    tree.remove(k, tid, t);
-    if((void*) tid != nullptr) {
-      t.getEpoche().markNodeForDeletion((void*) tid, t);
-    }
-  }
-
-  bool lookup(const uint64_t& key, uint64_t& value) {
-    static thread_local auto t = tree.getThreadInfo();
-    Key k;
-    k.setInt(key);
-    pair* tid = (pair*) tree.lookup(k, t);
-    if(tid == nullptr) return false;
-    value = tid->value;
+    Key k(key);
+    KVType* kv = (KVType*) tree.lookup(k, t);
+    if(kv == nullptr) return false;
+    value = kv->value;
     return true;
   }
 
-  int scan(const uint64_t& key, int num) {
+  int scan(const uint64_t& key, int num) override {
     static thread_local auto t = tree.getThreadInfo();
-    Key starts;
-    Key continues;
-    starts.setInt(key);
+    Key start(key);
+    Key finish;
 
     TID tids[num];
     size_t count;
-    tree.lookupRange(starts, max_key, continues, tids, num, count, t);
+    tree.lookupRange(start, max_key, finish, tids, num, count, t);
 
     return count;
   }
 };
 
 template<>
-class IndexART<std::string, uint64_t> : public Index<std::string, uint64_t> {
+class IndexART<String, uint64_t> : public Index<String, uint64_t> {
   ART_OLC::Tree tree;
   Key max_key;
 
   static constexpr int max_len = 256;
-  using String = FeatureBTree::String;
-  using pair = FeatureBTree::KVPair<String, uint64_t>;
 
  private:
   void set_key(const char* str, int len, Key& key) {
@@ -114,74 +91,53 @@ class IndexART<std::string, uint64_t> : public Index<std::string, uint64_t> {
 
  public:
   IndexART() : tree([](TID tid, Key& key) {
+    // Notes: load all key as a fixed length string
+    // ARTOLC may access the byte beyond the length
+    KVType* kv = (KVType*) tid;
     key.setKeyLen(max_len);
-    char* str = ((pair*) tid)->key.str;
-    int len = ((pair*) tid)->key.len;
-    memcpy(key.data, str, len);
-    memset(key.data + len, 0, max_len - len);
+    memcpy(key.data, kv->key.str, kv->key.len);
+    memset(key.data + kv->key.len, 0, max_len - kv->key.len);
   }) {
     char str[max_len];
     memset(str, 0xFF, max_len);
     max_key.set(str, max_len);
   }
 
-  ~IndexART() {}
+  ~IndexART() override {}
 
-  std::string index_type() { return "ART"; }
+  std::string index_type() override { return "ART"; }
 
-  void insert(const std::string& key, uint64_t value) {
+  void insert(KVType* kv) override {
     static thread_local auto t = tree.getThreadInfo();
-    pair* tid = (pair*) malloc(sizeof(pair) + key.size());
-    tid->value = value, tid->key.len = key.size();
-    memcpy(tid->key.str, key.data(), key.size());
-
     Key k;
-    set_key(key.data(), key.size(), k);
-    tree.insert(k, (TID) tid, t);
+    set_key(kv->key.str, kv->key.len, k);
+    tree.insert(k, (TID) kv, t);
   }
 
-  void update(const std::string& key, uint64_t value) {
-    static thread_local auto t = tree.getThreadInfo();
-    Key k;
-    set_key(key.data(), key.size(), k);
-    pair* tid = (pair*) tree.lookup(k, t);
-
-    if(tid != nullptr) {
-      ((std::atomic<uint64_t>&) tid->value).exchange(value);
-    }
+  void update(KVType* kv) override {
+    insert(kv);
   }
 
-  void remove(const std::string& key) {
+  bool lookup(const String& key, uint64_t& value) override {
     static thread_local auto t = tree.getThreadInfo();
     Key k;
-    set_key(key.data(), key.size(), k);
-    TID tid = tree.lookup(k, t);
-    tree.remove(k, tid, t);
-    if((void*) tid != nullptr) {
-      t.getEpoche().markNodeForDeletion((void*) tid, t);
-    }
-  }
+    set_key(key.str, key.len, k);
+    KVType* kv = (KVType*) tree.lookup(k, t);
+    if(kv == nullptr) return false;
 
-  bool lookup(const std::string& key, uint64_t& value) {
-    static thread_local auto t = tree.getThreadInfo();
-    Key k;
-    set_key(key.data(), key.size(), k);
-    pair* tid = (pair*) tree.lookup(k, t);
-    if(tid == nullptr) return false;
-
-    value = tid->value;
+    value = kv->value;
     return true;
   }
 
-  int scan(const std::string& key, int num) {
+  int scan(const String& key, int num) override {
     static thread_local auto t = tree.getThreadInfo();
-    Key starts;
-    Key continues;
-    set_key(key.data(), key.size(), starts);
+    Key start;
+    Key finish;
+    set_key(key.str, key.len, start);
 
     TID tids[num];
     size_t count;
-    tree.lookupRange(starts, max_key, continues, tids, num, count, t);
+    tree.lookupRange(start, max_key, finish, tids, num, count, t);
 
     return count;
   }
@@ -189,51 +145,36 @@ class IndexART<std::string, uint64_t> : public Index<std::string, uint64_t> {
 
 template<>
 class IndexHOT<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
-  using pair = FeatureBTree::KVPair<uint64_t, uint64_t>;
-
   template<class KV>
   struct KeyExtractor {
     typedef uint64_t KeyType;
 
-    inline KeyType operator()(const pair* kv) {
+    inline KeyType operator()(const KVType* kv) {
       return kv->key;
     }
   };
 
-  using Trie_t = hot::rowex::HOTRowex<pair*, KeyExtractor>;
+  using Trie_t = hot::rowex::HOTRowex<KVType*, KeyExtractor>;
   Trie_t tree;
 
  public:
   IndexHOT() {}
 
-  ~IndexHOT() {}
+  ~IndexHOT() override {}
 
-  std::string index_type() { return "HOT"; }
+  std::string index_type() override { return "HOT"; }
 
-  void insert(const uint64_t& key, uint64_t value) {
-    pair* kv = new pair{key, value};
-    tree.upsert(kv);
+  void insert(KVType* kv) override { tree.upsert(kv); }
+
+  void update(KVType* kv) override { tree.upsert(kv); }
+
+  bool lookup(const uint64_t& key, uint64_t& value) override {
+    idx::contenthelpers::OptionalValue<KVType*> ret = tree.lookup(key);
+    if(ret.mIsValid) value = ret.mValue->value;
+    return ret.mIsValid;
   }
 
-  void update(const uint64_t& key, uint64_t value) {
-    idx::contenthelpers::OptionalValue<pair*> ret = tree.lookup(key);
-    if(ret.mIsValid) {
-      ((std::atomic<uint64_t>&) ret.mValue->value).exchange(value);
-    }
-  }
-
-  void remove(const uint64_t& key) {}
-
-  bool lookup(const uint64_t& key, uint64_t& value) {
-    idx::contenthelpers::OptionalValue<pair*> ret = tree.lookup(key);
-    if(ret.mIsValid) {
-      value = ret.mValue->value;
-      return true;
-    }
-    return false;
-  }
-
-  int scan(const uint64_t& key, int num) {
+  int scan(const uint64_t& key, int num) override {
     auto iterator = tree.lower_bound(key);
     int count = 0;
     for(size_t i = 0; i < num; i++) {
@@ -245,57 +186,38 @@ class IndexHOT<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
 };
 
 template<>
-class IndexHOT<std::string, uint64_t> : public Index<std::string, uint64_t> {
-  using String = FeatureBTree::String;
-  using pair = FeatureBTree::KVPair<String, uint64_t>;
-
+class IndexHOT<String, uint64_t> : public Index<String, uint64_t> {
   template<class KV>
   struct KeyExtractor {
     typedef const char* KeyType;
 
-    inline KeyType operator()(const pair* kv) {
+    inline KeyType operator()(const KVType* kv) {
       return kv->key.str;
     }
   };
 
-  using Trie_t = hot::rowex::HOTRowex<pair*, KeyExtractor>;
+  using Trie_t = hot::rowex::HOTRowex<KVType*, KeyExtractor>;
   Trie_t tree;
 
  public:
   IndexHOT() {}
 
-  ~IndexHOT() {}
+  ~IndexHOT() override {}
 
-  std::string index_type() { return "HOT"; }
+  std::string index_type() override { return "HOT"; }
 
-  void insert(const std::string& key, uint64_t value) {
-    pair* kv = (pair*) malloc(sizeof(pair) + key.size() + 1);
-    kv->value = value, kv->key.len = key.size();
-    memcpy(kv->key.str, key.data(), key.size());
-    kv->key.str[key.size()] = 0;
-    tree.upsert(kv);
+  void insert(KVType* kv) override { tree.upsert(kv); }
+
+  void update(KVType* kv) override { tree.upsert(kv); }
+
+  bool lookup(const String& key, uint64_t& value) override {
+    idx::contenthelpers::OptionalValue<KVType*> ret = tree.lookup(key.str);
+    if(ret.mIsValid) value = ret.mValue->value;
+    return ret.mIsValid;
   }
 
-  void update(const std::string& key, uint64_t value) {
-    idx::contenthelpers::OptionalValue<pair*> ret = tree.lookup(key.data());
-    if(ret.mIsValid) {
-      ((std::atomic<uint64_t>&) ret.mValue->value).exchange(value);
-    }
-  }
-
-  void remove(const std::string& key) {}
-
-  bool lookup(const std::string& key, uint64_t& value) {
-    idx::contenthelpers::OptionalValue<pair*> ret = tree.lookup(key.data());
-    if(ret.mIsValid) {
-      value = ret.mValue->value;
-      return true;
-    }
-    return false;
-  }
-
-  int scan(const std::string& key, int num) {
-    auto iterator = tree.lower_bound(key.data());
+  int scan(const String& key, int num) override {
+    auto iterator = tree.lower_bound(key.str);
     int count = 0;
     for(size_t i = 0; i < num; i++) {
       if(iterator == tree.end()) break;
@@ -307,103 +229,107 @@ class IndexHOT<std::string, uint64_t> : public Index<std::string, uint64_t> {
 
 template<>
 class IndexBTreeOLC<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
-  btreeolc::BTree<uint64_t, uint64_t> tree;
+  btreeolc::BTree<uint64_t, KVType*> tree;
 
  public:
   IndexBTreeOLC() {}
 
-  ~IndexBTreeOLC() {}
+  ~IndexBTreeOLC() override {}
 
-  std::string index_type() { return "BTreeOLC"; }
+  std::string index_type() override { return "BTreeOLC"; }
 
-  void insert(const uint64_t& key, uint64_t value) {
-    tree.insert(key, value);
+  void insert(KVType* kv) override { tree.insert(kv->key, kv); }
+
+  void update(KVType* kv) override { tree.insert(kv->key, kv); }
+
+  bool lookup(const uint64_t& key, uint64_t& value) override {
+    KVType* kv = nullptr;
+    bool find = tree.lookup(key, kv);
+    if(find) value = kv->value;
+    return find;
   }
 
-  void update(const uint64_t& key, uint64_t value) {
-    tree.insert(key, value);
-  }
-
-  void remove(const uint64_t& key) {}
-
-  bool lookup(const uint64_t& key, uint64_t& value) {
-    return tree.lookup(key, value);
-  }
-
-  int scan(const uint64_t& key, int num) {
-    uint64_t out[num];
-    return tree.scan(key, num, out);
+  int scan(const uint64_t& key, int num) override {
+    uint64_t start = key;
+    KVType* out[num];
+    int count = 0;
+    while(true) {
+      assert(num > count);
+      int n = tree.scan(start, num - count, out + count);
+      count += n;
+      if(n == 0 || count == num) break;
+      start = out[count - 1]->key;
+    }
+    return count;
   }
 };
 
 template<>
-class IndexBTreeOLC<std::string, uint64_t> : public Index<std::string, uint64_t> {
-  struct String {
-    using KEY = FeatureBTree::String;
-    KEY* key;
+class IndexBTreeOLC<String, uint64_t> : public Index<String, uint64_t> {
+  struct Key {
+    String* key;
 
-    void construct(const char* str, int len) {
-      key = (KEY*) malloc(sizeof(KEY) + len);
-      key->len = len;
-      memcpy(key->str, str, len);
+    Key() : key(nullptr) {}
+
+    Key(const Key& k) = default;
+
+    explicit Key(const String& k) : key(const_cast<String*>(&k)) {}
+
+    Key& operator=(const Key& k) = default;
+
+    Key& operator=(const String& k) {
+      key = const_cast<String*>(&k);
+      return *this;
     }
 
-    bool operator<(const String& k) {
+    bool operator<(const Key& k) const {
       return *key < *k.key;
     }
 
-    bool operator>(const String& k) {
+    bool operator>(const Key& k) const {
       return *key > *k.key;
     }
 
-    bool operator==(const String& k) {
+    bool operator==(const Key& k) const {
       return *key == *k.key;
     }
 
-    bool operator!=(const String& k) {
+    bool operator!=(const Key& k) const {
       return *key != *k.key;
     }
   };
 
-  btreeolc::BTree<String, uint64_t> tree;
+  btreeolc::BTree<Key, KVType*> tree;
 
  public:
   IndexBTreeOLC() {}
 
-  ~IndexBTreeOLC() {}
+  ~IndexBTreeOLC() override {}
 
-  std::string index_type() { return "BTreeOLC"; }
+  std::string index_type() override { return "BTreeOLC"; }
 
-  void insert(const std::string& key, uint64_t value) {
-    String k;
-    k.construct(key.data(), key.size());
-    tree.insert(k, value);
-  }
+  void insert(KVType* kv) override { tree.insert(Key(kv->key), kv); }
 
-  void update(const std::string& key, uint64_t value) {
-    String k;
-    k.construct(key.data(), key.size());
-    tree.insert(k, value);
-    free(k.key);
-  }
+  void update(KVType* kv) override { tree.insert(Key(kv->key), kv); }
 
-  void remove(const std::string& key) {}
-
-  bool lookup(const std::string& key, uint64_t& value) {
-    String k;
-    k.construct(key.data(), key.size());
-    bool find = tree.lookup(k, value);
-    free(k.key);
+  bool lookup(const String& key, uint64_t& value) override {
+    KVType* kv = nullptr;
+    bool find = tree.lookup(Key(key), kv);
+    if(find) value = kv->value;
     return find;
   }
 
-  int scan(const std::string& key, int num) {
-    String k;
-    k.construct(key.data(), key.size());
-
-    uint64_t out[num];
-    int count = tree.scan(k, num, out);
-    free(k.key);
+  int scan(const String& key, int num) override {
+    Key start(key);
+    KVType* out[num];
+    int count = 0;
+    while(true) {
+      assert(num > count);
+      int n = tree.scan(start, num - count, out + count);
+      count += n;
+      if(n == 0 || count == num) break;
+      start = out[count - 1]->key;
+    }
     return count;
   }
 };
@@ -415,39 +341,31 @@ class IndexFBTree<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
  public:
   IndexFBTree() {}
 
-  ~IndexFBTree() {}
+  ~IndexFBTree() override {}
 
-  std::string index_type() { return "FBTree"; }
+  std::string index_type() override { return "FBTree"; }
 
-  void insert(const uint64_t& key, uint64_t value) {
-    EpochGuard guard(tree.get_epoch());
-    tree.upsert(key, value);
+  void insert(KVType* kv) override {
+    // guarding thread, not single insert/update/lookup/scan operation
+    static thread_local EpochGuard guard(tree.get_epoch());
+    tree.upsert(kv);
   }
 
-  void update(const uint64_t& key, uint64_t value) {
-    EpochGuard guard(tree.get_epoch());
-    auto kv = tree.lookup(key);
-    if(kv != nullptr) {
-      ((std::atomic<uint64_t>&) kv->value).exchange(value);
-    }
+  void update(KVType* kv) override {
+    static thread_local EpochGuard guard(tree.get_epoch());
+    tree.update(kv);
   }
 
-  void remove(const uint64_t& key) {
-    EpochGuard guard(tree.get_epoch());
-    auto kv = tree.remove(key);
-    guard.retire(kv);
-  }
-
-  bool lookup(const uint64_t& key, uint64_t& value) {
-    EpochGuard guard(tree.get_epoch());
-    auto kv = tree.lookup(key);
+  bool lookup(const uint64_t& key, uint64_t& value) override {
+    static thread_local EpochGuard guard(tree.get_epoch());
+    KVType* kv = tree.lookup(key);
     if(kv == nullptr) return false;
     value = kv->value;
     return true;
   }
 
-  int scan(const uint64_t& key, int num) {
-    EpochGuard guard(tree.get_epoch());
+  int scan(const uint64_t& key, int num) override {
+    static thread_local EpochGuard guard(tree.get_epoch());
     auto it = tree.lower_bound(key);
     int count = 0;
     for(int i = 0; i < num; i++) {
@@ -459,46 +377,37 @@ class IndexFBTree<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
 };
 
 template<>
-class IndexFBTree<std::string, uint64_t> : public Index<std::string, uint64_t> {
-  FeatureBTree::FBTree<FeatureBTree::String, uint64_t> tree;
+class IndexFBTree<String, uint64_t> : public Index<String, uint64_t> {
+  FeatureBTree::FBTree<String, uint64_t> tree;
 
  public:
   IndexFBTree() {}
 
-  ~IndexFBTree() {}
+  ~IndexFBTree() override {}
 
-  std::string index_type() { return "FBTree"; }
+  std::string index_type() override { return "FBTree"; }
 
-  void insert(const std::string& key, uint64_t value) {
-    EpochGuard guard(tree.get_epoch());
-    tree.upsert(key, value);
+  void insert(KVType* kv) override {
+    static thread_local EpochGuard guard(tree.get_epoch());
+    tree.upsert(kv);
   }
 
-  void update(const std::string& key, uint64_t value) {
-    EpochGuard guard(tree.get_epoch());
-    auto kv = tree.lookup(key);
-    if(kv != nullptr) {
-      ((std::atomic<uint64_t>&) kv->value).exchange(value);
-    }
+  void update(KVType* kv) override {
+    static thread_local EpochGuard guard(tree.get_epoch());
+    tree.update(kv);
   }
 
-  void remove(const std::string& key) {
-    EpochGuard guard(tree.get_epoch());
-    auto kv = tree.remove(key);
-    guard.retire(kv);
-  }
-
-  bool lookup(const std::string& key, uint64_t& value) {
-    EpochGuard guard(tree.get_epoch());
-    auto kv = tree.lookup(key);
+  bool lookup(const String& key, uint64_t& value) override {
+    static thread_local EpochGuard guard(tree.get_epoch());
+    auto kv = tree.lookup(const_cast<String&>(key));
     if(kv == nullptr) return false;
     value = kv->value;
     return true;
   }
 
-  int scan(const std::string& key, int num) {
-    EpochGuard guard(tree.get_epoch());
-    auto it = tree.lower_bound(key);
+  int scan(const String& key, int num) override {
+    static thread_local EpochGuard guard(tree.get_epoch());
+    auto it = tree.lower_bound(const_cast<String&>(key));
     int count = 0;
     for(int i = 0; i < num; i++) {
       if(it.end()) break;
@@ -511,21 +420,33 @@ class IndexFBTree<std::string, uint64_t> : public Index<std::string, uint64_t> {
 
 volatile uint64_t globalepoch = 1;     // global epoch, updated by main thread regularly
 volatile uint64_t active_epoch = 1;
+std::mutex mass_lock;
+int mass_nthread = 0;
 
 class MassTreeBase {
   struct NodeParam : Masstree::nodeparams<> {
-    typedef uint64_t value_type;
+    typedef void* value_type;
     typedef threadinfo threadinfo_type;
   };
 
-  typedef Masstree::basic_table<NodeParam> Tree_t;
-  typedef typename Masstree::basic_table<NodeParam>::cursor_type locked_cursor_t;
-  typedef typename Masstree::basic_table<NodeParam>::unlocked_cursor_type unlocked_cursor_t;
+  class ThreadGuard {
+    threadinfo* info_;
 
-  Tree_t tree_;
-  std::atomic<int> nthd;
-  std::mutex lock_;
-  inline static thread_local threadinfo* thd_info = nullptr;
+   public:
+    ThreadGuard() {
+      std::lock_guard guard(mass_lock);
+      info_ = threadinfo::make(threadinfo::TI_PROCESS, mass_nthread++);
+      info_->rcu_start();
+    }
+
+    ~ThreadGuard() {
+      info_->rcu_stop();
+    }
+
+    threadinfo* info() {
+      return info_;
+    }
+  };
 
   struct Scanner {
     int count;
@@ -534,74 +455,61 @@ class MassTreeBase {
     Scanner(int size) : count(0), num(size) {}
 
     template<typename SS, typename K>
-    void visit_leaf(const SS&, const K&, threadinfo&) {
-    }
+    void visit_leaf(const SS&, const K&, threadinfo&) {}
 
-    bool visit_value(lcdf::Str key, uint64_t value, threadinfo&) {
+    bool visit_value(lcdf::Str key, void* value, threadinfo&) {
       if(++count < num) return true;
 
       return false;
     }
   };
 
- private:
-  void make_info(int purpose, int index) {
-    if(thd_info == nullptr) {
-      std::lock_guard<std::mutex> guard(lock_);
-      thd_info = threadinfo::make(purpose, index);
-    }
-  }
+  typedef Masstree::basic_table<NodeParam> Tree_t;
+  typedef typename Masstree::basic_table<NodeParam>::cursor_type locked_cursor_t;
+  typedef typename Masstree::basic_table<NodeParam>::unlocked_cursor_type unlocked_cursor_t;
 
-  threadinfo* get_info() {
-    if(thd_info == nullptr) {
-      make_info(threadinfo::TI_PROCESS, nthd++);
-    }
-    assert(thd_info != nullptr);
-    return thd_info;
+  Tree_t tree_;
+
+  static void epochinc(int) {
+    globalepoch += 2;
+    active_epoch = threadinfo::min_active_epoch();
   }
 
  public:
-  MassTreeBase() : nthd(0) {
-    make_info(threadinfo::TI_MAIN, -1);
-    tree_.initialize(*thd_info);
+  MassTreeBase() {
+    static ThreadGuard guard;
+    tree_.initialize(*guard.info());
+    signal(SIGALRM, epochinc);
+    itimerval timer{};
+    timer.it_value.tv_sec = 0;
+    timer.it_value.tv_usec = 100;
+    timer.it_interval.tv_sec = 0;
+    timer.it_interval.tv_usec = 100;
+    int ret = setitimer(ITIMER_REAL, &timer, nullptr);
+    assert(ret == 0);
   }
 
-  void upsert(const char* key, int len, uint64_t value) {
-    threadinfo* info = get_info();
-    info->rcu_start();
+  void upsert(const char* key, int len, void* kv) {
+    static thread_local ThreadGuard guard;
     locked_cursor_t lp(tree_, key, len);
-    lp.find_insert(*info);
-    lp.value() = value;
-    lp.finish(1, *info);
-    info->rcu_stop();
+    lp.find_insert(*guard.info());
+    lp.value() = kv;
+    lp.finish(1, *guard.info());
   }
 
-  bool lookup(const char* key, int len, uint64_t& value) {
-    threadinfo* info = get_info();
-    info->rcu_start();
+  bool lookup(const char* key, int len, void*& kv) {
+    static thread_local ThreadGuard guard;
     unlocked_cursor_t lp(tree_, key, len);
-    bool find = lp.find_unlocked(*info);
-    if(find) value = lp.value();
-    info->rcu_stop();
+    bool find = lp.find_unlocked(*guard.info());
+    if(find) kv = lp.value();
     return find;
   }
 
-  void remove(const char* key, int len) {
-    threadinfo* info = get_info();
-    info->rcu_start();
-    locked_cursor_t lp(tree_, key, len);
-    lp.find_locked(*info);
-    lp.finish(-1, *info);
-    info->rcu_stop();
-  }
-
   int scan(const char* key, int len, int num) {
-    threadinfo* info = get_info();
-    info->rcu_start();
+    static thread_local ThreadGuard guard;
     lcdf::Str first(key, len);
     Scanner scanner(num);
-    int count = tree_.scan(first, true, scanner, *info);
-    info->rcu_stop();
+    int count = tree_.scan(first, false, scanner, *guard.info());
     return count;
   }
 };
@@ -613,113 +521,91 @@ class IndexMASS<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
  public:
   IndexMASS() {}
 
-  ~IndexMASS() {}
+  ~IndexMASS() override {}
 
-  std::string index_type() { return "MassTree"; }
+  std::string index_type() override { return "MassTree"; }
 
-  void insert(const uint64_t& key, uint64_t value) {
-    uint64_t k = byte_swap(key);
-    tree.upsert((char*) &k, 8, value);
+  void insert(KVType* kv) override {
+    uint64_t k = byte_swap(kv->key);
+    tree.upsert((char*) &k, 8, kv);
   }
 
-  void update(const uint64_t& key, uint64_t value) {
-    uint64_t k = byte_swap(key);
-    tree.upsert((char*) &k, 8, value);
+  void update(KVType* kv) override {
+    uint64_t k = byte_swap(kv->key);
+    tree.upsert((char*) &k, 8, kv);
   }
 
-  void remove(const uint64_t& key) {
+  bool lookup(const uint64_t& key, uint64_t& value) override {
     uint64_t k = byte_swap(key);
-    tree.remove((char*) &k, 8);
+    void* kv = nullptr;
+    bool find = tree.lookup((char*) &k, 8, kv);
+    if(find) value = ((KVType*) kv)->value;
+    return find;
   }
 
-  bool lookup(const uint64_t& key, uint64_t& value) {
-    uint64_t k = byte_swap(key);
-    return tree.lookup((char*) &k, 8, value);
-  }
-
-  int scan(const uint64_t& key, int num) {
+  int scan(const uint64_t& key, int num) override {
     uint64_t k = byte_swap(key);
     return tree.scan((char*) &k, 8, num);
   }
 };
 
 template<>
-class IndexMASS<std::string, uint64_t> : public Index<std::string, uint64_t> {
+class IndexMASS<String, uint64_t> : public Index<String, uint64_t> {
   MassTreeBase tree;
 
  public:
   IndexMASS() {}
 
-  ~IndexMASS() {}
+  ~IndexMASS() override {}
 
-  std::string index_type() { return "MassTree"; }
+  std::string index_type() override { return "MassTree"; }
 
-  void insert(const std::string& key, uint64_t value) {
-    tree.upsert(key.data(), key.size(), value);
+  void insert(KVType* kv) override {
+    tree.upsert(kv->key.str, kv->key.len, kv);
   }
 
-  void update(const std::string& key, uint64_t value) {
-    tree.upsert(key.data(), key.size(), value);
+  void update(KVType* kv) override { insert(kv); }
+
+  bool lookup(const String& key, uint64_t& value) override {
+    void* kv = nullptr;
+    bool find = tree.lookup(key.str, key.len, kv);
+    if(find)value = ((KVType*) kv)->value;
+    return find;
   }
 
-  void remove(const std::string& key) {
-    tree.remove(key.data(), key.size());
-  }
-
-  bool lookup(const std::string& key, uint64_t& value) {
-    return tree.lookup(key.data(), key.size(), value);
-  }
-
-  int scan(const std::string& key, int num) {
-    return tree.scan(key.data(), key.size(), num);
+  int scan(const String& key, int num) override {
+    return tree.scan(key.str, key.len, num);
   }
 };
 
 template<>
 class IndexWH<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
   wormhole* wh;
-  inline static thread_local wormref* whref = nullptr;
-
-  void make_ref() {
-    if(whref == nullptr) {
-      whref = wh_ref(wh);
-    }
-  }
 
  public:
   IndexWH() { wh = wh_create(); }
 
-  ~IndexWH() {}
+  ~IndexWH() override {}
 
-  std::string index_type() { return "WormHole"; }
+  std::string index_type() override { return "WormHole"; }
 
-  void insert(const uint64_t& key, uint64_t value) {
-    make_ref();
-    uint64_t k = byte_swap(key);
-    wh_put(whref, &k, 8, &value, 8);
+  void insert(KVType* kv) override {
+    static thread_local wormref* whref = wh_ref(wh);
+    uint64_t k = byte_swap(kv->key);
+    wh_put(whref, &k, 8, &kv->value, 8);
   }
 
-  void update(const uint64_t& key, uint64_t value) {
-    make_ref();
-    uint64_t k = byte_swap(key);
-    wh_put(whref, &k, 8, &value, 8);
-  }
+  void update(KVType* kv) override { insert(kv); }
 
-  void remove(const uint64_t& key) {
-    make_ref();
-    uint64_t k = byte_swap(key);
-    wh_del(whref, &k, 8);
-  }
-
-  bool lookup(const uint64_t& key, uint64_t& value) {
-    make_ref();
+  bool lookup(const uint64_t& key, uint64_t& value) override {
+    static thread_local wormref* whref = wh_ref(wh);
     uint64_t k = byte_swap(key);
     uint32_t vlen;
     return wh_get(whref, &k, 8, &value, 8, &vlen);
   }
 
-  int scan(const uint64_t& key, int num) {
-    make_ref();
+  int scan(const uint64_t& key, int num) override {
+    static thread_local wormref* whref = wh_ref(wh);
     uint64_t k = byte_swap(key);
 
     wormhole_iter* iter = wh_iter_create(whref);
@@ -736,49 +622,33 @@ class IndexWH<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
 };
 
 template<>
-class IndexWH<std::string, uint64_t> : public Index<std::string, uint64_t> {
+class IndexWH<String, uint64_t> : public Index<String, uint64_t> {
   wormhole* wh;
-  inline static thread_local wormref* whref = nullptr;
-
-  void make_ref() {
-    if(whref == nullptr) {
-      whref = wh_ref(wh);
-    }
-  }
 
  public:
   IndexWH() { wh = wh_create(); }
 
-  ~IndexWH() {}
+  ~IndexWH() override {}
 
-  std::string index_type() { return "WormHole"; }
+  std::string index_type() override { return "WormHole"; }
 
-  void insert(const std::string& key, uint64_t value) {
-    make_ref();
-    wh_put(whref, key.data(), key.size(), &value, 8);
+  void insert(KVType* kv) override {
+    static thread_local wormref* whref = wh_ref(wh);
+    wh_put(whref, kv->key.str, kv->key.len, &kv->value, 8);
   }
 
-  void update(const std::string& key, uint64_t value) {
-    make_ref();
-    wh_put(whref, key.data(), key.size(), &value, 8);
-  }
+  void update(KVType* kv) override { insert(kv); }
 
-  void remove(const std::string& key) {
-    make_ref();
-    wh_del(whref, key.data(), key.size());
-  }
-
-  bool lookup(const std::string& key, uint64_t& value) {
-    make_ref();
+  bool lookup(const String& key, uint64_t& value) override {
+    static thread_local wormref* whref = wh_ref(wh);
     uint32_t vlen;
-    return wh_get(whref, key.data(), key.size(), &value, 8, &vlen);
+    return wh_get(whref, key.str, key.len, &value, 8, &vlen);
   }
 
-  int scan(const std::string& key, int num) {
-    make_ref();
-
+  int scan(const String& key, int num) override {
+    static thread_local wormref* whref = wh_ref(wh);
     wormhole_iter* iter = wh_iter_create(whref);
-    wh_iter_seek(iter, key.data(), key.size());
+    wh_iter_seek(iter, key.str, key.len);
     int count = 0;
     for(int i = 0; i < num; i++) {
       if(!wh_iter_valid(iter)) break;
@@ -792,42 +662,35 @@ class IndexWH<std::string, uint64_t> : public Index<std::string, uint64_t> {
 
 template<>
 class IndexGBTree<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
-  btree::btree_map<uint64_t, uint64_t> tree;
+  btree::btree_map<uint64_t, KVType*> tree;
   std::mutex lock;
 
  public:
   IndexGBTree() {}
 
-  ~IndexGBTree() {}
+  ~IndexGBTree() override {}
 
-  std::string index_type() { return "GoogleBTree"; }
+  std::string index_type() override { return "GoogleBTree"; }
 
-  void insert(const uint64_t& key, uint64_t value) {
+  void insert(KVType* kv) override {
     std::lock_guard<std::mutex> guard(lock);
-    tree.insert(std::make_pair(key, value));
+    tree.insert(std::make_pair(kv->key, kv));
   }
 
-  void update(const uint64_t& key, uint64_t value) {
+  void update(KVType* kv) override {
     std::lock_guard<std::mutex> guard(lock);
-    auto it = tree.find(key);
-    if(it != tree.end()) {
-      it->second = value;
-    }
+    auto it = tree.find(kv->key);
+    if(it != tree.end()) it->second = kv;
   }
 
-  void remove(const uint64_t& key) {
-    std::lock_guard<std::mutex> guard(lock);
-    tree.erase(key);
-  }
-
-  bool lookup(const uint64_t& key, uint64_t& value) {
+  bool lookup(const uint64_t& key, uint64_t& value) override {
     auto it = tree.find(key);
     if(it == tree.end()) return false;
-    value = it->second;
+    value = it->second->value;
     return true;
   }
 
-  int scan(const uint64_t& key, int num) {
+  int scan(const uint64_t& key, int num) override {
     auto it = tree.lower_bound(key);
     int count = 0;
     for(int i = 0; i < num; i++) {
@@ -839,79 +702,70 @@ class IndexGBTree<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
 };
 
 template<>
-class IndexGBTree<std::string, uint64_t> : public Index<std::string, uint64_t> {
-  struct String {
-    using KEY = FeatureBTree::String;
-    KEY* key;
+class IndexGBTree<String, uint64_t> : public Index<String, uint64_t> {
+  struct Key {
+    String* key;
 
-    void construct(const char* str, int len) {
-      key = (KEY*) malloc(sizeof(KEY) + len);
-      key->len = len;
-      memcpy(key->str, str, len);
-    }
+    Key() : key(nullptr) {}
 
-    String() { construct(nullptr, 0); }
+    Key(const Key& k) = default;
 
-    explicit String(const std::string& key) {
-      construct((char*) key.data(), key.size());
-    }
+    explicit Key(const String& k) : key(const_cast<String*>(&k)) {}
 
-    String(const String& str) {
-      construct(str.key->str, str.key->len);
-    }
+    Key& operator=(const Key& k) = default;
 
-    ~String() {
-      free(key);
-    }
-
-    String& operator=(const String& str) {
-      free(key);
-      construct(str.key->str, str.key->len);
+    Key& operator=(const String& k) {
+      key = const_cast<String*>(&k);
       return *this;
     }
 
-    friend bool operator<(const String& k1, const String& k2) {
-      return *k1.key < *k2.key;
+    bool operator<(const Key& k) const {
+      return *key < *k.key;
+    }
+
+    bool operator>(const Key& k) const {
+      return *key > *k.key;
+    }
+
+    bool operator==(const Key& k) const {
+      return *key == *k.key;
+    }
+
+    bool operator!=(const Key& k) const {
+      return *key != *k.key;
     }
   };
 
-  btree::btree_map<String, uint64_t> tree;
+  btree::btree_map<Key, KVType*> tree;
   std::mutex lock;
 
  public:
   IndexGBTree() {}
 
-  ~IndexGBTree() {}
+  ~IndexGBTree() override {}
 
-  std::string index_type() { return "GoogleBTree"; }
+  std::string index_type() override { return "GoogleBTree"; }
 
-  void insert(const std::string& key, uint64_t value) {
+  void insert(KVType* kv) override {
     std::lock_guard<std::mutex> guard(lock);
-    tree.insert(std::make_pair(String(key), value));
+    tree.insert(std::make_pair(Key(kv->key), kv));
   }
 
-  void update(const std::string& key, uint64_t value) {
+  void update(KVType* kv) override {
     std::lock_guard<std::mutex> guard(lock);
-    auto it = tree.find(String(key));
-    if(it != tree.end()) {
-      it->second = value;
-    }
+    auto it = tree.find(Key(kv->key));
+    if(it != tree.end()) it->second = kv;
   }
 
-  void remove(const std::string& key) {
-    std::lock_guard<std::mutex> guard(lock);
-    tree.erase(String(key));
-  }
-
-  bool lookup(const std::string& key, uint64_t& value) {
-    auto it = tree.find(String(key));
+  bool lookup(const String& key, uint64_t& value) override {
+    auto it = tree.find(Key(key));
     if(it == tree.end()) return false;
-    value = it->second;
+    value = it->second->value;
     return true;
   }
 
-  int scan(const std::string& key, int num) {
-    auto it = tree.lower_bound(String(key));
+  int scan(const String& key, int num) override {
+    auto it = tree.lower_bound(Key(key));
     int count = 0;
     for(int i = 0; i < num; i++) {
       if(it == tree.end()) break;
@@ -923,47 +777,39 @@ class IndexGBTree<std::string, uint64_t> : public Index<std::string, uint64_t> {
 
 template<>
 class IndexSTX<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
-  tlx::btree_map<uint64_t, uint64_t> tree;
+  tlx::btree_map<uint64_t, KVType*> tree;
   std::mutex lock;
 
  public:
   IndexSTX() {}
 
-  ~IndexSTX() {}
+  ~IndexSTX() override {}
 
-  std::string index_type() { return "STX BTree"; }
+  std::string index_type() override { return "STX BTree"; }
 
-  void insert(const uint64_t& key, uint64_t value) {
+  void insert(KVType* kv) override {
     std::lock_guard<std::mutex> guard(lock);
-    tree.insert(std::make_pair(key, value));
+    tree.insert(std::make_pair(kv->key, kv));
   }
 
-  void update(const uint64_t& key, uint64_t value) {
+  void update(KVType* kv) override {
     std::lock_guard<std::mutex> guard(lock);
-    auto it = tree.find(key);
-    if(it != tree.end()) {
-      it->second = value;
-    }
+    auto it = tree.find(kv->key);
+    if(it != tree.end()) it->second = kv;
   }
 
-  void remove(const uint64_t& key) {
-    std::lock_guard<std::mutex> guard(lock);
-    tree.erase(key);
-  }
-
-  bool lookup(const uint64_t& key, uint64_t& value) {
+  bool lookup(const uint64_t& key, uint64_t& value) override {
     auto it = tree.find(key);
     if(it == tree.end()) return false;
-    value = it->second;
+    value = it->second->value;
     return true;
   }
 
-  int scan(const uint64_t& key, int num) {
+  int scan(const uint64_t& key, int num) override {
     auto it = tree.lower_bound(key);
     int count = 0;
-
     for(int i = 0; i < num; i++) {
-      if(it == tree.end())break;
+      if(it == tree.end()) break;
       count++, it++;
     }
 
@@ -972,83 +818,74 @@ class IndexSTX<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
 };
 
 template<>
-class IndexSTX<std::string, uint64_t> : public Index<std::string, uint64_t> {
-  struct String {
-    using KEY = FeatureBTree::String;
-    KEY* key;
+class IndexSTX<String, uint64_t> : public Index<String, uint64_t> {
+  struct Key {
+    String* key;
 
-    void construct(const char* str, int len) {
-      key = (KEY*) malloc(sizeof(KEY) + len);
-      key->len = len;
-      memcpy(key->str, str, len);
-    }
+    Key() : key(nullptr) {}
 
-    String() { construct(nullptr, 0); }
+    Key(const Key& k) = default;
 
-    explicit String(const std::string& key) {
-      construct((char*) key.data(), key.size());
-    }
+    explicit Key(const String& k) : key(const_cast<String*>(&k)) {}
 
-    String(const String& str) {
-      construct(str.key->str, str.key->len);
-    }
+    Key& operator=(const Key& k) = default;
 
-    ~String() {
-      free(key);
-    }
-
-    String& operator=(const String& str) {
-      free(key);
-      construct(str.key->str, str.key->len);
+    Key& operator=(const String& k) {
+      key = const_cast<String*>(&k);
       return *this;
     }
 
-    friend bool operator<(const String& k1, const String& k2) {
-      return *k1.key < *k2.key;
+    bool operator<(const Key& k) const {
+      return *key < *k.key;
+    }
+
+    bool operator>(const Key& k) const {
+      return *key > *k.key;
+    }
+
+    bool operator==(const Key& k) const {
+      return *key == *k.key;
+    }
+
+    bool operator!=(const Key& k) const {
+      return *key != *k.key;
     }
   };
 
-  tlx::btree_map<String, uint64_t> tree;
+  tlx::btree_map<Key, KVType*> tree;
   std::mutex lock;
 
  public:
   IndexSTX() {}
 
-  ~IndexSTX() {}
+  ~IndexSTX() override {}
 
-  std::string index_type() { return "STX BTree"; }
+  std::string index_type() override { return "STX BTree"; }
 
-  void insert(const std::string& key, uint64_t value) {
+  void insert(KVType* kv) override {
     std::lock_guard<std::mutex> guard(lock);
-    tree.insert(std::make_pair(String(key), value));
+    tree.insert(std::make_pair(Key(kv->key), kv));
   }
 
-  void update(const std::string& key, uint64_t value) {
+  void update(KVType* kv) override {
     std::lock_guard<std::mutex> guard(lock);
-    auto it = tree.find(String(key));
-    if(it != tree.end()) {
-      it->second = value;
-    }
+    auto it = tree.find(Key(kv->key));
+    if(it != tree.end()) it->second = kv;
   }
 
-  void remove(const std::string& key) {
-    std::lock_guard<std::mutex> guard(lock);
-    tree.erase(String(key));
-  }
-
-  bool lookup(const std::string& key, uint64_t& value) {
-    auto it = tree.find(String(key));
+  bool lookup(const String& key, uint64_t& value) override {
+    auto it = tree.find(Key(key));
     if(it == tree.end()) return false;
-    value = it->second;
+    value = it->second->value;
     return true;
   }
 
-  int scan(const std::string& key, int num) {
-    auto it = tree.lower_bound(String(key));
+  int scan(const String& key, int num) override {
+    auto it = tree.lower_bound(Key(key));
     int count = 0;
 
     for(int i = 0; i < num; i++) {
-      if(it == tree.end())break;
+      if(it == tree.end()) break;
       count++, it++;
     }
 
@@ -1082,24 +919,24 @@ Index<uint64_t, uint64_t>* IndexFactory<uint64_t, uint64_t>::get_index(INDEX_TYP
 }
 
 template<>
-Index<std::string, uint64_t>* IndexFactory<std::string, uint64_t>::get_index(INDEX_TYPE type) {
+Index<String, uint64_t>* IndexFactory<String, uint64_t>::get_index(INDEX_TYPE type) {
   switch(type) {
     case ARTOLC:
-      return new IndexART<std::string, uint64_t>();
+      return new IndexART<String, uint64_t>();
     case HOT:
-      return new IndexHOT<std::string, uint64_t>();
+      return new IndexHOT<String, uint64_t>();
     case BTREEOLC :
-      return new IndexBTreeOLC<std::string, uint64_t>();
+      return new IndexBTreeOLC<String, uint64_t>();
     case FBTREE:
-      return new IndexFBTree<std::string, uint64_t>();
+      return new IndexFBTree<String, uint64_t>();
     case MASSTREE:
-      return new IndexMASS<std::string, uint64_t>();
+      return new IndexMASS<String, uint64_t>();
     case WORMHOLE:
-      return new IndexWH<std::string, uint64_t>();
+      return new IndexWH<String, uint64_t>();
     case GBTREE:
-      return new IndexGBTree<std::string, uint64_t>();
+      return new IndexGBTree<String, uint64_t>();
     case STXBTREE:
-      return new IndexSTX<std::string, uint64_t>();
+      return new IndexSTX<String, uint64_t>();
     default:
       return nullptr;
   }

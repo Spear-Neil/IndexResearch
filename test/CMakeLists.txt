@@ -9,10 +9,10 @@ link_libraries(pthread numa jemalloc tbb)
 set(artlib ../ARTOLC/Tree.cpp)
 set(masslib ../MassTree/kvthread.cc ../MassTree/compiler.cc ../MassTree/str.cc ../MassTree/string.cc ../MassTree/straccum.cc)
 set(whlib ../wormhole/kv.c ../wormhole/lib.c ../wormhole/wh.c)
-add_library(indexes index.cpp ${artlib} ${masslib} ${whlib})
+add_library(indexes SHARED index.cpp ${artlib} ${masslib} ${whlib})
 
 add_executable(CacheMissTest cache_miss.cpp)
 
 link_libraries(indexes)
-add_executable(int_test int_test.cpp)
-add_executable(str_test str_test.cpp)
+add_executable(ycsb_build ycsb_build.cpp)
+add_executable(ycsb_test ycsb_test.cpp)

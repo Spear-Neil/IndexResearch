@@ -1,3 +1,9 @@
+/*
+ * Copyright (c) 2022, Chen Yuan <yuan.chen@whu.edu.cn>
+ *
+ * All rights reserved. No warranty, explicit or implicit, provided.
+ */
+
 #ifndef INDEXRESEARCH_CONTROL_H
 #define INDEXRESEARCH_CONTROL_H
 
@@ -132,8 +138,6 @@ class Control {
     CONDITION_ERROR((control_.load(load_order) & kLockBit) == 0, "unlatch error");
     control_.fetch_sub(kLockBit);
   }
-
-
 };
 
 static_assert(sizeof(Control) == 8);

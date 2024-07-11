@@ -1,3 +1,9 @@
+/*
+ * Copyright (c) 2022, Chen Yuan <yuan.chen@whu.edu.cn>
+ *
+ * All rights reserved. No warranty, explicit or implicit, provided.
+ */
+
 #ifndef INDEXRESEARCH_CONFIG_H
 #define INDEXRESEARCH_CONFIG_H
 
