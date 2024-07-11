@@ -244,8 +244,9 @@ int main(int argc, char* argv[]) {
   else run_tpt = run_driver<String>(*(StrIndex*) tree, str_runs, thread_num, run_time);
   std::cout << "end, throughput: " << run_tpt << std::endl;
 
-  double index_with_loads = 0, only_loads = 0;
-  only_loads = load_usage - init_usage;
+  double vec_size = 0, index_with_loads = 0, only_loads = 0;
+  vec_size = int_key ? int_loads.capacity() : str_loads.capacity();
+  only_loads = load_usage - init_usage - vec_size * sizeof(Request<uint64_t>);
   if(index_type == MASSTREE || index_type == WORMHOLE) index_with_loads = index_usage - run_usage;
   else index_with_loads = index_usage - run_usage + only_loads;
 

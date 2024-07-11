@@ -32,8 +32,14 @@ struct Config {
   static constexpr bool kNodePrefetch = true;
   /* node prefetch size, default 4 cache line (for string key) */
   static constexpr int kPrefetchSize = 4;
-  /* the initial extent size, valid if kExtentOpt(true) */
+  /* backoff of CAS, spin n times before backoff, spin kSpinInit times
+   * at first, then spin kSpinInit + kSpinInc * times of backoff; spin
+   * kSpinInit at first to ensure there is heavy contention, increase
+   * kSpinInc times to ensure a thread does not wait too long */
+  static constexpr int kSpinInit = 3, kSpinInc = 2;
+  /* store anchors in contiguous memory blocks, not scattered */
   static constexpr bool kExtentOpt = false;
+  /* the initial extent size, valid if kExtentOpt(true) */
   static constexpr int kExtentSize = 2048;
 };
 
