@@ -220,13 +220,18 @@ class alignas(Config::kAlignSize) LeafNode {
 
     while(mask) {
       int idx = index_least1(mask);
+      int spin = 0, limit = Config::kSpinInit;
       KVPair* old = kvs_[idx].load(load_order);
       while(old != nullptr && kv->key == old->key) {
         if(kvs_[idx].compare_exchange_strong(old, kv)) {
           return old; // update operation succeeded
         }
-        using namespace std::chrono_literals;
-        std::this_thread::sleep_for(1us);
+
+        if(spin++ >= limit) {
+          using namespace std::chrono_literals;
+          std::this_thread::sleep_for(1us);
+          spin = 0, limit += Config::kSpinInc;
+        }
         // if failed because other threads' updates, try again
         old = kvs_[idx].load(load_order); // get the latest kv
       }
@@ -693,13 +698,18 @@ class alignas(Config::kAlignSize) LeafNode<String, V> {
 
     while(mask) {
       int idx = index_least1(mask);
+      int spin = 0, limit = Config::kSpinInit;
       KVPair* old = kvs_[idx].load(load_order);
       while(old != nullptr && kv->key == old->key) {
         if(kvs_[idx].compare_exchange_strong(old, kv)) {
           return old; // update operation succeeded
         }
-        using namespace std::chrono_literals;
-        std::this_thread::sleep_for(1us);
+
+        if(spin++ >= limit) {
+          using namespace std::chrono_literals;
+          std::this_thread::sleep_for(1us);
+          spin = 0, limit += Config::kSpinInc;
+        }
         // if failed because other threads' updates, try again
         old = kvs_[idx].load(load_order); // get the latest kv
       }

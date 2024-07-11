@@ -1,6 +1,6 @@
 # FBTree
 In essence, FBTree is identical to a main-memory B+Tree except for the layout of inner node and leaf node.
-Similar to employing bit or byte for branch operation in Tries, FBTree gradually considers several bytes, referred to as features, following the common prefix on each leaf of inner nodes. 
+Similar to employing bit or byte for branch operation in Tries, FBTree gradually considers several bytes, referred to as features, following the common prefix on each level of inner nodes. 
 By incorporating features, FBTree introduces radix concept into B+Tree, so that it blurs the boundary between B+Trees and Tries.
 In the best case, FBTree almost becomes a Trie, whereas in the worst case, it continues to function as a B+Tree.
 
@@ -9,7 +9,7 @@ FBTree adopts a highly optimized optimistic synchronization protocol for concurr
 It combines the link technique from B-link-Tree with optimistic lock coupling, while the disadvantages of both are eschewed.
 It highlights:
 * Latch-free index traversal
-* Latch-free lookup/update
+* Latch-free lookup/update (subtle atomic operation coordinating with optimistic lock)
 * No comparison overhead with high_key (B-link-Tree in contrast)
 * No restarts from root node (optimistic lock coupling in contrast)
 

@@ -11,6 +11,7 @@
 #include <thread>
 #include <cassert>
 #include "log.h"
+#include "config.h"
 
 namespace FeatureBTree {
 
@@ -35,7 +36,7 @@ class Control {
  public:
   Control() = delete;
 
-  Control(bool is_leaf) : control_(is_leaf ? kLeafBit : 0) {}
+  explicit Control(bool is_leaf) : control_(is_leaf ? kLeafBit : 0) {}
 
   bool ordered() { return control_.load(load_order) & kOrderBit; }
 
@@ -60,6 +61,7 @@ class Control {
 
   uint64_t begin_read() {
     // begin atomic reading node, if locked, waiting for other thread
+    int spin = 0, limit = Config::kSpinInit;
     while(true) {
       uint64_t control = control_.load(load_order);
       if((control & kLockBit) == 0) {
@@ -67,8 +69,11 @@ class Control {
       }
 
       // waiting for other threads' modification
-      using namespace std::chrono_literals;
-      std::this_thread::sleep_for(1us);
+      if(spin++ >= limit) {
+        using namespace std::chrono_literals;
+        std::this_thread::sleep_for(1us);
+        spin = 0, limit += Config::kSpinInc;
+      }
     }
   }
 
@@ -118,6 +123,7 @@ class Control {
   }
 
   void latch_exclusive() {
+    int spin = 0, limit = Config::kSpinInit;
     while(true) {
       // using backoff, so reload control before cas
       uint64_t expected = control_.load(load_order);
@@ -125,8 +131,12 @@ class Control {
       if((expected & kLockBit) == 0 &&
          control_.compare_exchange_strong(expected, desired))
         break;
-      using namespace std::chrono_literals;
-      std::this_thread::sleep_for(1us);
+
+      if(spin++ >= limit) {
+        using namespace std::chrono_literals;
+        std::this_thread::sleep_for(1us);
+        spin = 0, limit += Config::kSpinInc;
+      }
     }
   }
 
