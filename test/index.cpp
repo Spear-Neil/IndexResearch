@@ -69,6 +69,8 @@ class IndexART<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
 
     TID tids[num];
     size_t count;
+    // it seems some bugs in ARTOLC, insert concurrent with scan(ycsb workload e)
+    // a node was obsoleted, lookupRange reloads this node over and over
     tree.lookupRange(start, max_key, finish, tids, num, count, t);
 
     return count;
@@ -134,6 +136,8 @@ class IndexART<String, uint64_t> : public Index<String, uint64_t> {
 
     TID tids[num];
     size_t count;
+    // it seems some bugs in ARTOLC, insert concurrent with scan(ycsb workload e)
+    // a node was obsoleted, lookupRange reloads this node over and over
     tree.lookupRange(start, max_key, finish, tids, num, count, t);
 
     return count;
@@ -242,7 +246,8 @@ class IndexBTreeOLC<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
   bool lookup(const uint64_t& key, uint64_t& value) override {
     KVType* kv = nullptr;
     bool find = tree.lookup(key, kv);
-    if(find) value = kv->value;
+    // it seems some bugs in BTreeOLC, lookup concurrent with insert(ycsb workload d)
+    if(find && kv) value = kv->value;
     return find;
   }
 
@@ -312,7 +317,8 @@ class IndexBTreeOLC<String, uint64_t> : public Index<String, uint64_t> {
   bool lookup(const String& key, uint64_t& value) override {
     KVType* kv = nullptr;
     bool find = tree.lookup(Key(key), kv);
-    if(find) value = kv->value;
+    // it seems some bugs in BTreeOLC, lookup concurrent with insert(ycsb workload d)
+    if(find && kv) value = kv->value;
     return find;
   }
 
