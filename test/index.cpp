@@ -80,23 +80,20 @@ class IndexART<String, uint64_t> : public Index<String, uint64_t> {
   ART_OLC::Tree tree;
   Key max_key;
 
-  static constexpr int max_len = 256;
+  static constexpr int max_len = 255;
 
  private:
-  void set_key(const char* str, int len, Key& key) {
-    key.setKeyLen(max_len);
-    memcpy(key.data, str, len);
-    memset(key.data + len, 0, max_len - len);
+  static void set_key(const char* str, int len, Key& key) {
+    // Notes: set key[len] = '\0' to ensure no seg fault
+    // ARTOLC may access the byte beyond the length (insert)
+    if(len > max_len) len = max_len;
+    key.set(str, len), key[len] = '\0';
   }
 
  public:
   IndexART() : tree([](TID tid, Key& key) {
-    // Notes: load all key as a fixed length string
-    // ARTOLC may access the byte beyond the length
     KVType* kv = (KVType*) tid;
-    key.setKeyLen(max_len);
-    memcpy(key.data, kv->key.str, kv->key.len);
-    memset(key.data + kv->key.len, 0, max_len - kv->key.len);
+    set_key(kv->key.str, kv->key.len, key);
   }) {
     char str[max_len];
     memset(str, 0xFF, max_len);

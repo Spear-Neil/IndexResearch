@@ -11,7 +11,7 @@ using KeyLen = uint32_t;
 class Key {
 public:
 
-    static constexpr uint32_t stackLen = 128;
+    static constexpr uint32_t stackLen = 256;
     uint32_t len = 0;
 
     uint8_t *data;
