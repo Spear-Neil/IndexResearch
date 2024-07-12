@@ -674,7 +674,7 @@ pages_lock(void * const ptr, const size_t size)
     const int ret = mlock(ptr, size);
     if (ret != 0) {
       use_mlock = false;
-      fprintf(stderr, "%s: mlock disabled\n", __func__);
+//      fprintf(stderr, "%s: mlock disabled\n", __func__);
     }
   }
 }
