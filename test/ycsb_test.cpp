@@ -21,6 +21,8 @@ std::unordered_map<std::string, ReqType> ops{{"INSERT", INSERT},
                                              {"READ",   READ},
                                              {"SCAN",   SCAN}};
 
+bool skip_insert = false; // ARTOLC may have some bugs in scan
+
 template<typename K>
 struct Request {
   typedef typename Index<K, uint64_t>::KVType KVType;
@@ -91,7 +93,7 @@ double run_driver(Index<K, uint64_t>& index, std::vector<Request<K>>& runs, int 
       timer.start();
       while(true) {
         Request<K>& req = runs[req_cnt % size + begin];
-        if(req.type == INSERT) index.insert(req.kv);
+        if(req.type == INSERT && !skip_insert) index.insert(req.kv);
         else if(req.type == UPDATE) index.update(req.kv);
         else if(req.type == READ) index.lookup(req.kv->key, value);
         else if(req.type == SCAN) index.scan(req.kv->key, req.rng_len);
@@ -223,6 +225,7 @@ int main(int argc, char* argv[]) {
       str_runs.push_back(req);
     }
   }
+  if(req_count[SCAN] > 0 && index_type == ARTOLC) skip_insert = true;
   run_size = int_key ? int_runs.size() : str_runs.size();
   int insert_ratio, update_ratio, read_ratio, scan_ratio;
   insert_ratio = std::round((double) req_count[INSERT] * 100 / run_size);
