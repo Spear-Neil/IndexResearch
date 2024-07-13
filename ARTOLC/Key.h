@@ -53,12 +53,12 @@ public:
 
 
 inline uint8_t &Key::operator[](std::size_t i) {
-    assert(i < len);
+//    assert(i < len);
     return data[i];
 }
 
 inline const uint8_t &Key::operator[](std::size_t i) const {
-    assert(i < len);
+//    assert(i < len);
     return data[i];
 }
 

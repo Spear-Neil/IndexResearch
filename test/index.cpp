@@ -99,7 +99,7 @@ class IndexART<String, uint64_t> : public Index<String, uint64_t> {
   }) {
     char str[max_len];
     memset(str, 0xFF, max_len);
-    max_key.set(str, max_len);
+    max_key.set(str, max_len), max_key[max_len] = '\0';
   }
 
   ~IndexART() override {}
