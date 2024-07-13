@@ -162,11 +162,10 @@ int main(int argc, char* argv[]) {
 
   double load_tpt = 0, run_tpt = 0, avg_len = 0;
   size_t load_size = 0, run_size = 0;
-  size_t init_usage = 0, load_usage = 0, run_usage = 0, index_usage = 0;
+  size_t load_usage = 0, init_usage = 0, index_usage = 0;
   std::vector<Request<uint64_t>> int_loads, int_runs;
   std::vector<Request<String>> str_loads, str_runs;
 
-  init_usage = acquire_memory_usage();
   std::cout << "-- read load workloads ... " << std::flush;
   std::string raw_req;
   while(std::getline(fload, raw_req)) {
@@ -182,12 +181,14 @@ int main(int argc, char* argv[]) {
     if(int_key) {
       using KVType = typename Request<uint64_t>::KVType;
       KVType* kv = (KVType*) malloc(sizeof(KVType));
+      load_usage += sizeof(KVType);
       kv->key = value, kv->value = kv->value;
       Request<uint64_t> req{.type=INSERT, .kv=kv};
       int_loads.push_back(req), avg_len += sizeof(uint64_t);
     } else {
       using KVType = typename Request<String>::KVType;
       KVType* kv = (KVType*) malloc(sizeof(KVType) + req_key.size() + 1);
+      load_usage += sizeof(KVType) + req_key.size() + 1;
       memcpy(kv->key.str, req_key.data(), req_key.size());
       kv->value = value, kv->key.len = req_key.size(), kv->key.str[req_key.size()] = '\0';
       Request<String> req{.type = INSERT, .kv = kv};
@@ -197,7 +198,6 @@ int main(int argc, char* argv[]) {
   load_size = int_key ? int_loads.size() : str_loads.size();
   avg_len = avg_len / load_size;
   std::cout << "end, loads size: " << load_size << ", avg key len: " << avg_len << std::endl;
-  load_usage = acquire_memory_usage();
 
   std::unordered_map<ReqType, size_t> req_count;
   std::cout << "-- read run workloads ... " << std::flush;
@@ -234,8 +234,8 @@ int main(int argc, char* argv[]) {
   scan_ratio = std::round((double) req_count[SCAN] * 100 / run_size);
   std::cout << "end" << ", Insert/Update/Read/Scan: " << insert_ratio << "/"
             << update_ratio << "/" << read_ratio << "/" << scan_ratio << std::endl;
-  run_usage = acquire_memory_usage();
 
+  init_usage = acquire_memory_usage();
   std::cout << "-- load phase ... " << std::flush;
   if(int_key) load_tpt = load_driver<uint64_t>(*(IntIndex*) tree, int_loads, thread_num);
   else load_tpt = load_driver<String>(*(StrIndex*) tree, str_loads, thread_num);
@@ -247,14 +247,10 @@ int main(int argc, char* argv[]) {
   else run_tpt = run_driver<String>(*(StrIndex*) tree, str_runs, thread_num, run_time);
   std::cout << "end, throughput: " << run_tpt << std::endl;
 
-  double vec_size = 0, index_with_loads = 0, only_loads = 0;
-  vec_size = int_key ? int_loads.capacity() : str_loads.capacity();
-  only_loads = load_usage - init_usage - vec_size * sizeof(Request<uint64_t>);
-  if(index_type == MASSTREE || index_type == WORMHOLE) index_with_loads = index_usage - run_usage;
-  else index_with_loads = index_usage - run_usage + only_loads;
-
-  std::cout << "-- memory usage, index with loads: " << index_with_loads / kGigaByte
-            << ", only loads: " << only_loads / kGigaByte << std::endl;
+  index_usage = index_usage - init_usage;
+  if(index_type != MASSTREE && index_type != WORMHOLE) index_usage += load_usage;
+  std::cout << "-- memory usage, index with loads: " << double(index_usage) / kGigaByte
+            << ", only loads: " << double(load_usage) / kGigaByte << std::endl;
 
   return 0;
 }
