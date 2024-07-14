@@ -15,6 +15,7 @@ typedef Index<uint64_t, uint64_t> IntIndex;
 typedef Index<String, uint64_t> StrIndex;
 enum ReqType { INSERT, UPDATE, READ, SCAN };
 constexpr size_t kGigaByte = 1024ul * 1024 * 1024;
+constexpr size_t kReserveSize = 100'000'000ul;
 
 std::unordered_map<std::string, ReqType> ops{{"INSERT", INSERT},
                                              {"UPDATE", UPDATE},
@@ -165,66 +166,73 @@ int main(int argc, char* argv[]) {
   size_t load_usage = 0, init_usage = 0, index_usage = 0;
   std::vector<Request<uint64_t>> int_loads, int_runs;
   std::vector<Request<String>> str_loads, str_runs;
+  if(int_key) int_loads.reserve(kReserveSize), int_runs.reserve(kReserveSize);
+  else str_loads.reserve(kReserveSize), str_runs.reserve(kReserveSize);
 
-  std::cout << "-- read load workloads ... " << std::flush;
-  std::string raw_req;
-  while(std::getline(fload, raw_req)) {
-    auto&& req_elem = string_split(std::move(raw_req), ' ');
-    std::string& req_type = req_elem[0], & req_key = req_elem[1];
-    if(req_key.size() > 255) req_key = req_key.substr(0, 255);
-    if(req_type != "INSERT") {
-      std::cerr << "-- invalid load workloads" << std::endl;
-      exit(-1);
-    }
-    uint64_t value = hash(req_key.data(), req_key.size());
+  std::vector<std::thread> workers;
+  std::unordered_map<ReqType, size_t> req_count;
+  std::cout << "-- read load & run workloads ... " << std::flush;
+  workers.push_back(std::thread([&]() {
+    std::string raw_req;
+    while(std::getline(fload, raw_req)) {
+      auto&& req_elem = string_split(std::move(raw_req), ' ');
+      std::string& req_type = req_elem[0], & req_key = req_elem[1];
+      if(req_key.size() > 255) req_key = req_key.substr(0, 255);
+      if(req_type != "INSERT") {
+        std::cerr << "-- invalid load workloads" << std::endl;
+        exit(-1);
+      }
+      uint64_t value = hash(req_key.data(), req_key.size());
 
-    if(int_key) {
-      using KVType = typename Request<uint64_t>::KVType;
-      KVType* kv = (KVType*) malloc(sizeof(KVType));
-      load_usage += sizeof(KVType);
-      kv->key = value, kv->value = kv->value;
-      Request<uint64_t> req{.type=INSERT, .kv=kv};
-      int_loads.push_back(req), avg_len += sizeof(uint64_t);
-    } else {
-      using KVType = typename Request<String>::KVType;
-      KVType* kv = (KVType*) malloc(sizeof(KVType) + req_key.size() + 1);
-      load_usage += sizeof(KVType) + req_key.size() + 1;
-      memcpy(kv->key.str, req_key.data(), req_key.size());
-      kv->value = value, kv->key.len = req_key.size(), kv->key.str[req_key.size()] = '\0';
-      Request<String> req{.type = INSERT, .kv = kv};
-      str_loads.push_back(req), avg_len += req_key.size();
+      if(int_key) {
+        using KVType = typename Request<uint64_t>::KVType;
+        KVType* kv = (KVType*) malloc(sizeof(KVType));
+        load_usage += sizeof(KVType);
+        kv->key = value, kv->value = kv->value;
+        Request<uint64_t> req{.type=INSERT, .kv=kv};
+        int_loads.push_back(req), avg_len += sizeof(uint64_t);
+      } else {
+        using KVType = typename Request<String>::KVType;
+        KVType* kv = (KVType*) malloc(sizeof(KVType) + req_key.size() + 1);
+        load_usage += sizeof(KVType) + req_key.size() + 1;
+        memcpy(kv->key.str, req_key.data(), req_key.size());
+        kv->value = value, kv->key.len = req_key.size(), kv->key.str[req_key.size()] = '\0';
+        Request<String> req{.type = INSERT, .kv = kv};
+        str_loads.push_back(req), avg_len += req_key.size();
+      }
     }
-  }
+  }));
+  workers.push_back(std::thread([&]() {
+    std::string raw_req;
+    while(std::getline(frun, raw_req)) {
+      auto&& req_elem = string_split(std::move(raw_req), ' ');
+      std::string& req_type = req_elem[0], & req_key = req_elem[1];
+      if(req_key.size() > 255) req_key = req_key.substr(0, 255);
+      uint64_t value = hash(req_key.data(), req_key.size());
+
+      req_count[ops[req_type]]++;
+      if(int_key) {
+        using KVType = typename Request<uint64_t>::KVType;
+        KVType* kv = (KVType*) malloc(sizeof(KVType));
+        kv->key = value, kv->value = kv->value;
+        Request<uint64_t> req{.type=ops[req_type], .kv=kv};
+        if(req.type == SCAN) req.rng_len = std::stoi(req_elem[2]);
+        int_runs.push_back(req);
+      } else {
+        using KVType = typename Request<String>::KVType;
+        KVType* kv = (KVType*) malloc(sizeof(KVType) + req_key.size() + 1);
+        memcpy(kv->key.str, req_key.data(), req_key.size());
+        kv->value = value, kv->key.len = req_key.size(), kv->key.str[req_key.size()] = '\0';
+        Request<String> req{.type =ops[req_type], .kv = kv};
+        if(req.type == SCAN) req.rng_len = std::stoi(req_elem[2]);
+        str_runs.push_back(req);
+      }
+    }
+  }));
+  for(auto& worker : workers) worker.join();
   load_size = int_key ? int_loads.size() : str_loads.size();
   avg_len = avg_len / load_size;
-  std::cout << "end, loads size: " << load_size << ", avg key len: " << avg_len << std::endl;
 
-  std::unordered_map<ReqType, size_t> req_count;
-  std::cout << "-- read run workloads ... " << std::flush;
-  while(std::getline(frun, raw_req)) {
-    auto&& req_elem = string_split(std::move(raw_req), ' ');
-    std::string& req_type = req_elem[0], & req_key = req_elem[1];
-    if(req_key.size() > 255) req_key = req_key.substr(0, 255);
-    uint64_t value = hash(req_key.data(), req_key.size());
-
-    req_count[ops[req_type]]++;
-    if(int_key) {
-      using KVType = typename Request<uint64_t>::KVType;
-      KVType* kv = (KVType*) malloc(sizeof(KVType));
-      kv->key = value, kv->value = kv->value;
-      Request<uint64_t> req{.type=ops[req_type], .kv=kv};
-      if(req.type == SCAN) req.rng_len = std::stoi(req_elem[2]);
-      int_runs.push_back(req);
-    } else {
-      using KVType = typename Request<String>::KVType;
-      KVType* kv = (KVType*) malloc(sizeof(KVType) + req_key.size() + 1);
-      memcpy(kv->key.str, req_key.data(), req_key.size());
-      kv->value = value, kv->key.len = req_key.size(), kv->key.str[req_key.size()] = '\0';
-      Request<String> req{.type =ops[req_type], .kv = kv};
-      if(req.type == SCAN) req.rng_len = std::stoi(req_elem[2]);
-      str_runs.push_back(req);
-    }
-  }
   if(req_count[SCAN] > 0 && index_type == ARTOLC) skip_insert = true;
   run_size = int_key ? int_runs.size() : str_runs.size();
   int insert_ratio, update_ratio, read_ratio, scan_ratio;
@@ -232,8 +240,8 @@ int main(int argc, char* argv[]) {
   update_ratio = std::round((double) req_count[UPDATE] * 100 / run_size);
   read_ratio = std::round((double) req_count[READ] * 100 / run_size);
   scan_ratio = std::round((double) req_count[SCAN] * 100 / run_size);
-  std::cout << "end" << ", Insert/Update/Read/Scan: " << insert_ratio << "/"
-            << update_ratio << "/" << read_ratio << "/" << scan_ratio << std::endl;
+  std::cout << "end\n-- avg key len: " << avg_len << ", Insert/Update/Read/Scan: " << insert_ratio
+            << "/" << update_ratio << "/" << read_ratio << "/" << scan_ratio << std::endl;
 
   init_usage = acquire_memory_usage();
   std::cout << "-- load phase ... " << std::flush;
