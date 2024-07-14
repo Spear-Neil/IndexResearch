@@ -173,6 +173,7 @@ int main(int argc, char* argv[]) {
   std::unordered_map<ReqType, size_t> req_count;
   std::cout << "-- read load & run workloads ... " << std::flush;
   workers.push_back(std::thread([&]() {
+    pin.pinning_thread_continuous(pthread_self());
     std::string raw_req;
     while(std::getline(fload, raw_req)) {
       auto&& req_elem = string_split(std::move(raw_req), ' ');
@@ -203,6 +204,7 @@ int main(int argc, char* argv[]) {
     }
   }));
   workers.push_back(std::thread([&]() {
+    pin.pinning_thread_continuous(pthread_self());
     std::string raw_req;
     while(std::getline(frun, raw_req)) {
       auto&& req_elem = string_split(std::move(raw_req), ' ');
