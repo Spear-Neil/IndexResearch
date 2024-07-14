@@ -484,10 +484,10 @@ class MassTreeBase {
     tree_.initialize(*guard.info());
     signal(SIGALRM, epochinc);
     itimerval timer{};
-    timer.it_value.tv_sec = 0;
-    timer.it_value.tv_usec = 100;
-    timer.it_interval.tv_sec = 0;
-    timer.it_interval.tv_usec = 100;
+    timer.it_value.tv_sec = 1;
+    timer.it_value.tv_usec = 0;
+    timer.it_interval.tv_sec = 1;
+    timer.it_interval.tv_usec = 0;
     int ret = setitimer(ITIMER_REAL, &timer, nullptr);
     assert(ret == 0);
   }
