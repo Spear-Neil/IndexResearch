@@ -70,8 +70,7 @@ class Control {
 
       // waiting for other threads' modification
       if(spin++ >= limit) {
-        using namespace std::chrono_literals;
-        std::this_thread::sleep_for(1us);
+        std::this_thread::yield();
         spin = 0, limit += Config::kSpinInc;
       }
     }
@@ -133,8 +132,7 @@ class Control {
         break;
 
       if(spin++ >= limit) {
-        using namespace std::chrono_literals;
-        std::this_thread::sleep_for(1us);
+        std::this_thread::yield();
         spin = 0, limit += Config::kSpinInc;
       }
     }
