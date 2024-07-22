@@ -34,6 +34,7 @@ add_subdirectory(FBTree)
 add_subdirectory(GoogleBTree)
 add_subdirectory(HOT)
 add_subdirectory(MassTree)
+add_subdirectory(OptiQL)
 add_subdirectory(STX)
 add_subdirectory(wormhole)
 

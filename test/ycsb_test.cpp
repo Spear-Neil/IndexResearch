@@ -122,7 +122,7 @@ int main(int argc, char* argv[]) {
     std::cerr << "-- load workloads path, run workloads path, index type, thread number,"
                  " run time(second), [int key type(0/1), 0 by default]" << std::endl;
     std::cerr << "-- index type: ";
-    for(int t = ARTOLC; t <= STXBTREE; t++) {
+    for(int t = ARTOLC; t <= ARTOptiQL; t++) {
       std::cerr << t << "-" << IndexFactory<uint64_t, uint64_t>::get_index(INDEX_TYPE(t))->index_type() << ", ";
     }
     std::cerr << std::endl;

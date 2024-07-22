@@ -30,7 +30,8 @@ enum INDEX_TYPE {
   BTREEOLC = 2, FBTREE = 3, // b+tree
   MASSTREE = 4,             // hybrid trie/b+tree
   WORMHOLE = 5,             // hybrid hash/b+tree
-  GBTREE = 6, STXBTREE = 7  // memory optimized b+tree (concurrency unsafe)
+  GBTREE = 6, STXBTREE = 7, // memory optimized b+tree (concurrency unsafe)
+  ARTOptiQL = 8             // ARTOLC with Optimistic Queuing lock
 };
 
 template<typename K, typename V>
@@ -56,6 +57,9 @@ class IndexGBTree : public Index<K, V> {};
 
 template<typename K, typename V>
 class IndexSTX : public Index<K, V> {};
+
+template<typename K, typename V>
+class IndexARTOptiQL : public Index<K, V> {};
 
 template<typename K, typename V>
 class IndexFactory {

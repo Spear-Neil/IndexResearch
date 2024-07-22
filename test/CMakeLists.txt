@@ -7,9 +7,11 @@ include_directories(../HOT/include)
 add_compile_options(-march=native)
 link_libraries(pthread numa jemalloc tbb)
 set(artlib ../ARTOLC/Tree.cpp)
+set(optiqllib ../OptiQL/Tree.cpp)
 set(masslib ../MassTree/kvthread.cc ../MassTree/compiler.cc ../MassTree/str.cc ../MassTree/string.cc ../MassTree/straccum.cc)
 set(whlib ../wormhole/kv.c ../wormhole/lib.c ../wormhole/wh.c)
-add_library(indexes SHARED index.cpp ${artlib} ${masslib} ${whlib})
+add_library(indexes SHARED index.cpp ${artlib} ${masslib} ${whlib} ${optiqllib})
+target_compile_definitions(indexes PUBLIC OMCS_LOCK IS_CONTEXTFUL OMCS_OP_READ OMCS_OFFSET)# OMCS_OFFSET_NUMA_QNODE)
 
 add_executable(CacheMissTest cache_miss.cpp)
 

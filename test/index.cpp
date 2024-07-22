@@ -41,7 +41,7 @@ class IndexART<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
 
   ~IndexART() override {}
 
-  std::string index_type() override { return "ART"; }
+  std::string index_type() override { return "ARTOLC"; }
 
   void insert(KVType* kv) override {
     static thread_local auto t = tree.getThreadInfo();
@@ -104,7 +104,7 @@ class IndexART<String, uint64_t> : public Index<String, uint64_t> {
 
   ~IndexART() override {}
 
-  std::string index_type() override { return "ART"; }
+  std::string index_type() override { return "ARTOLC"; }
 
   void insert(KVType* kv) override {
     static thread_local auto t = tree.getThreadInfo();
@@ -896,6 +896,163 @@ class IndexSTX<String, uint64_t> : public Index<String, uint64_t> {
   }
 };
 
+#include "../OptiQL/Tree.h"
+#include "../OptiQL/latches/OMCSOffset.h"
+#include "../ARTOLC/Epoche.cpp"
+
+template<>
+class IndexARTOptiQL<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
+  ART_OLC_OptiQL::Tree* tree;
+  inline static ART::Epoche* epoch;
+
+ private:
+  static void load_key(TID tid, Key& key) {
+    key.setInt(((KVType*) tid)->key);
+  }
+
+  static void remove_node(void* node) {
+    ART::ThreadInfo t(*epoch);
+    epoch->markNodeForDeletion(node, t);
+  }
+
+  struct Guard {
+    Guard() {
+      offset::reset_tls_qnodes();
+      auto info = ThreadInfo(*epoch);
+      epoch->enterEpoche(info);
+    }
+
+    ~Guard() {
+      auto info = ThreadInfo(*epoch);
+      epoch->exitEpocheAndCleanup(info);
+    }
+  };
+
+ public:
+  IndexARTOptiQL() {
+    offset::init_qnodes();
+    tree = new ART_OLC_OptiQL::Tree(load_key, remove_node);
+    epoch = new ART::Epoche(256);
+  }
+
+  ~IndexARTOptiQL() override {}
+
+  std::string index_type() override { return "ARTOptiQL"; }
+
+  void insert(KVType* kv) override {
+    thread_local static Guard guard;
+    Key k(kv->key);
+    tree->insert(k, (TID) kv);
+  }
+
+  void update(KVType* kv) override {
+    thread_local static Guard guard;
+    Key k(kv->key);
+    tree->update(k, (TID) kv);
+  }
+
+  bool lookup(const uint64_t& key, uint64_t& value) override {
+    thread_local static Guard guard;
+    Key k(key);
+    KVType* kv = (KVType*) tree->lookup(k);
+    if(kv == nullptr) return false;
+    value = kv->value;
+    return true;
+  }
+
+  int scan(const uint64_t& key, int num) override {
+    thread_local static Guard guard;
+    Key k(key);
+    size_t count = 0;
+    TID tids[num];
+    tree->lookupRange(k, tids, num, count);
+    return count;
+  }
+};
+
+template<>
+class IndexARTOptiQL<String, uint64_t> : public Index<String, uint64_t> {
+  ART_OLC_OptiQL::Tree* tree;
+  inline static ART::Epoche* epoch;
+
+  static constexpr int max_len = 255;
+
+ private:
+  static void set_key(const char* str, int len, Key& key) {
+    // Notes: set key[len] = '\0' to ensure no seg fault
+    // ARTOLC may access the byte beyond the length (insert)
+    if(len > max_len) len = max_len;
+    key.set(str, len), key[len] = '\0';
+  }
+
+  static void load_key(TID tid, Key& key) {
+    KVType* kv = (KVType*) tid;
+    set_key(kv->key.str, kv->key.len, key);
+  }
+
+  static void remove_node(void* node) {
+    ART::ThreadInfo t(*epoch);
+    epoch->markNodeForDeletion(node, t);
+  }
+
+  struct Guard {
+    Guard() {
+      offset::reset_tls_qnodes();
+      auto info = ThreadInfo(*epoch);
+      epoch->enterEpoche(info);
+    }
+
+    ~Guard() {
+      auto info = ThreadInfo(*epoch);
+      epoch->exitEpocheAndCleanup(info);
+    }
+  };
+
+ public:
+  IndexARTOptiQL() {
+    offset::init_qnodes();
+    tree = new ART_OLC_OptiQL::Tree(load_key, remove_node);
+    epoch = new ART::Epoche(256);
+  }
+
+  ~IndexARTOptiQL() override {}
+
+  std::string index_type() override { return "ARTOptiQL"; }
+
+  void insert(KVType* kv) override {
+    thread_local static Guard guard;
+    Key k;
+    set_key(kv->key.str, kv->key.len, k);
+    tree->insert(k, (TID) kv);
+  }
+
+  void update(KVType* kv) override {
+    thread_local static Guard guard;
+    Key k;
+    set_key(kv->key.str, kv->key.len, k);
+    tree->update(k, (TID) kv);
+  }
+
+  bool lookup(const String& key, uint64_t& value) override {
+    thread_local static Guard guard;
+    Key k;
+    set_key(key.str, key.len, k);
+    KVType* kv = (KVType*) tree->lookup(k);
+    if(kv == nullptr) return false;
+    value = kv->value;
+    return true;
+  }
+
+  int scan(const String& key, int num) override {
+    thread_local static Guard guard;
+    Key k;
+    set_key(key.str, key.len, k);
+    size_t count = 0;
+    TID tids[num];
+    tree->lookupRange(k, tids, num, count);
+    return count;
+  }
+};
 
 template<>
 Index<uint64_t, uint64_t>* IndexFactory<uint64_t, uint64_t>::get_index(INDEX_TYPE type) {
@@ -916,6 +1073,8 @@ Index<uint64_t, uint64_t>* IndexFactory<uint64_t, uint64_t>::get_index(INDEX_TYP
       return new IndexGBTree<uint64_t, uint64_t>();
     case STXBTREE:
       return new IndexSTX<uint64_t, uint64_t>();
+    case ARTOptiQL:
+      return new IndexARTOptiQL<uint64_t, uint64_t>();
     default:
       return nullptr;
   }
@@ -940,6 +1099,8 @@ Index<String, uint64_t>* IndexFactory<String, uint64_t>::get_index(INDEX_TYPE ty
       return new IndexGBTree<String, uint64_t>();
     case STXBTREE:
       return new IndexSTX<String, uint64_t>();
+    case ARTOptiQL:
+      return new IndexARTOptiQL<String, uint64_t>();
     default:
       return nullptr;
   }
