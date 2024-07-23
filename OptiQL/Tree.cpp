@@ -687,15 +687,15 @@ restart:
         level++;
     }
     uint64_t nv = OMCSLock::kInvalidVersion;
-    if (level == k.getKeyLen() - 1) {
-      // XXX(shiges): hack, only works for monotonic, dense int keys
-      // [node] is at the last level of the ART that corresponds to an ART_OLC::N
-      // I should lock [node] exclusively
-      LOCK_NODE(node);
-      lockAcquired = true;
-    } else {
+//    if (level == k.getKeyLen() - 1) {
+//      // XXX(shiges): hack, only works for monotonic, dense int keys
+//      // [node] is at the last level of the ART that corresponds to an ART_OLC::N
+//      // I should lock [node] exclusively
+//      LOCK_NODE(node);
+//      lockAcquired = true;
+//    } else {
       nv = node->readLockOrRestart(needRestart);
-    }
+//    }
     if (needRestart) {
       if (lockAcquired) {
         UNLOCK_NODE(node);
