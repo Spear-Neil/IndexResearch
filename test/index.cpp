@@ -349,18 +349,17 @@ class IndexFBTree<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
   std::string index_type() override { return "FBTree"; }
 
   void insert(KVType* kv) override {
-    // guarding thread, not single insert/update/lookup/scan operation
-    static thread_local EpochGuard guard(tree.get_epoch());
+    EpochGuard guard(tree.get_epoch());
     tree.upsert(kv);
   }
 
   void update(KVType* kv) override {
-    static thread_local EpochGuard guard(tree.get_epoch());
+    EpochGuard guard(tree.get_epoch());
     tree.update(kv);
   }
 
   bool lookup(const uint64_t& key, uint64_t& value) override {
-    static thread_local EpochGuard guard(tree.get_epoch());
+    EpochGuard guard(tree.get_epoch());
     KVType* kv = tree.lookup(key);
     if(kv == nullptr) return false;
     value = kv->value;
@@ -368,7 +367,7 @@ class IndexFBTree<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
   }
 
   int scan(const uint64_t& key, int num) override {
-    static thread_local EpochGuard guard(tree.get_epoch());
+    EpochGuard guard(tree.get_epoch());
     auto it = tree.lower_bound(key);
     int count = 0;
     for(int i = 0; i < num; i++) {
@@ -391,17 +390,17 @@ class IndexFBTree<String, uint64_t> : public Index<String, uint64_t> {
   std::string index_type() override { return "FBTree"; }
 
   void insert(KVType* kv) override {
-    static thread_local EpochGuard guard(tree.get_epoch());
+    EpochGuard guard(tree.get_epoch());
     tree.upsert(kv);
   }
 
   void update(KVType* kv) override {
-    static thread_local EpochGuard guard(tree.get_epoch());
+    EpochGuard guard(tree.get_epoch());
     tree.update(kv);
   }
 
   bool lookup(const String& key, uint64_t& value) override {
-    static thread_local EpochGuard guard(tree.get_epoch());
+    EpochGuard guard(tree.get_epoch());
     auto kv = tree.lookup(const_cast<String&>(key));
     if(kv == nullptr) return false;
     value = kv->value;
@@ -409,7 +408,7 @@ class IndexFBTree<String, uint64_t> : public Index<String, uint64_t> {
   }
 
   int scan(const String& key, int num) override {
-    static thread_local EpochGuard guard(tree.get_epoch());
+    EpochGuard guard(tree.get_epoch());
     auto it = tree.lower_bound(const_cast<String&>(key));
     int count = 0;
     for(int i = 0; i < num; i++) {
@@ -432,17 +431,19 @@ class MassTreeBase {
     typedef threadinfo threadinfo_type;
   };
 
-  class ThreadGuard {
-    threadinfo* info_;
+  class Guard {
+    inline thread_local static threadinfo* info_ = nullptr;
 
    public:
-    ThreadGuard() {
-      std::lock_guard guard(mass_lock);
-      info_ = threadinfo::make(threadinfo::TI_PROCESS, mass_nthread++);
+    Guard() {
+      if(info_ == nullptr) {
+        std::lock_guard guard(mass_lock);
+        info_ = threadinfo::make(threadinfo::TI_PROCESS, mass_nthread++);
+      }
       info_->rcu_start();
     }
 
-    ~ThreadGuard() {
+    ~Guard() {
       info_->rcu_stop();
     }
 
@@ -480,7 +481,7 @@ class MassTreeBase {
 
  public:
   MassTreeBase() {
-    static ThreadGuard guard;
+    Guard guard;
     tree_.initialize(*guard.info());
     signal(SIGALRM, epochinc);
     itimerval timer{};
@@ -493,7 +494,7 @@ class MassTreeBase {
   }
 
   void upsert(const char* key, int len, void* kv) {
-    static thread_local ThreadGuard guard;
+    Guard guard;
     locked_cursor_t lp(tree_, key, len);
     lp.find_insert(*guard.info());
     lp.value() = kv;
@@ -501,7 +502,7 @@ class MassTreeBase {
   }
 
   bool lookup(const char* key, int len, void*& kv) {
-    static thread_local ThreadGuard guard;
+    Guard guard;
     unlocked_cursor_t lp(tree_, key, len);
     bool find = lp.find_unlocked(*guard.info());
     if(find) kv = lp.value();
@@ -509,7 +510,7 @@ class MassTreeBase {
   }
 
   int scan(const char* key, int len, int num) {
-    static thread_local ThreadGuard guard;
+    Guard guard;
     lcdf::Str first(key, len);
     Scanner scanner(num);
     int count = tree_.scan(first, false, scanner, *guard.info());
@@ -917,13 +918,13 @@ class IndexARTOptiQL<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
 
   struct Guard {
     Guard() {
-      offset::reset_tls_qnodes();
-      auto info = ThreadInfo(*epoch);
+      if(offset::qnodes == nullptr) offset::reset_tls_qnodes();
+      thread_local static auto info = ThreadInfo(*epoch);
       epoch->enterEpoche(info);
     }
 
     ~Guard() {
-      auto info = ThreadInfo(*epoch);
+      thread_local static auto info = ThreadInfo(*epoch);
       epoch->exitEpocheAndCleanup(info);
     }
   };
@@ -940,19 +941,19 @@ class IndexARTOptiQL<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
   std::string index_type() override { return "ARTOptiQL"; }
 
   void insert(KVType* kv) override {
-    thread_local static Guard guard;
+    Guard guard;
     Key k(kv->key);
     tree->insert(k, (TID) kv);
   }
 
   void update(KVType* kv) override {
-    thread_local static Guard guard;
+    Guard guard;
     Key k(kv->key);
     tree->update(k, (TID) kv);
   }
 
   bool lookup(const uint64_t& key, uint64_t& value) override {
-    thread_local static Guard guard;
+    Guard guard;
     Key k(key);
     KVType* kv = (KVType*) tree->lookup(k);
     if(kv == nullptr) return false;
@@ -961,7 +962,7 @@ class IndexARTOptiQL<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
   }
 
   int scan(const uint64_t& key, int num) override {
-    thread_local static Guard guard;
+    Guard guard;
     Key k(key);
     size_t count = 0;
     TID tids[num];
@@ -997,7 +998,7 @@ class IndexARTOptiQL<String, uint64_t> : public Index<String, uint64_t> {
 
   struct Guard {
     Guard() {
-      offset::reset_tls_qnodes();
+      if(offset::qnodes == nullptr) offset::reset_tls_qnodes();
       auto info = ThreadInfo(*epoch);
       epoch->enterEpoche(info);
     }
@@ -1020,21 +1021,21 @@ class IndexARTOptiQL<String, uint64_t> : public Index<String, uint64_t> {
   std::string index_type() override { return "ARTOptiQL"; }
 
   void insert(KVType* kv) override {
-    thread_local static Guard guard;
+    Guard guard;
     Key k;
     set_key(kv->key.str, kv->key.len, k);
     tree->insert(k, (TID) kv);
   }
 
   void update(KVType* kv) override {
-    thread_local static Guard guard;
+    Guard guard;
     Key k;
     set_key(kv->key.str, kv->key.len, k);
     tree->update(k, (TID) kv);
   }
 
   bool lookup(const String& key, uint64_t& value) override {
-    thread_local static Guard guard;
+    Guard guard;
     Key k;
     set_key(key.str, key.len, k);
     KVType* kv = (KVType*) tree->lookup(k);
@@ -1044,7 +1045,7 @@ class IndexARTOptiQL<String, uint64_t> : public Index<String, uint64_t> {
   }
 
   int scan(const String& key, int num) override {
-    thread_local static Guard guard;
+    Guard guard;
     Key k;
     set_key(key.str, key.len, k);
     size_t count = 0;
