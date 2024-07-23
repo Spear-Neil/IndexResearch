@@ -966,6 +966,7 @@ class IndexARTOptiQL<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
     Key k(key);
     size_t count = 0;
     TID tids[num];
+    // similar bugs also in ARTOptiQL, endless loop
     tree->lookupRange(k, tids, num, count);
     return count;
   }
@@ -1050,6 +1051,7 @@ class IndexARTOptiQL<String, uint64_t> : public Index<String, uint64_t> {
     set_key(key.str, key.len, k);
     size_t count = 0;
     TID tids[num];
+    // similar bugs also in ARTOptiQL, endless loop
     tree->lookupRange(k, tids, num, count);
     return count;
   }

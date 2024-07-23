@@ -235,7 +235,8 @@ int main(int argc, char* argv[]) {
   load_size = int_key ? int_loads.size() : str_loads.size();
   avg_len = avg_len / load_size;
 
-  if(req_count[SCAN] > 0 && index_type == ARTOLC) skip_insert = true;
+  // endless loop in ART, skip insert operation in workload e
+  if(req_count[SCAN] > 0 && (index_type == ARTOLC || index_type == ARTOptiQL)) skip_insert = true;
   run_size = int_key ? int_runs.size() : str_runs.size();
   int insert_ratio, update_ratio, read_ratio, scan_ratio;
   insert_ratio = std::round((double) req_count[INSERT] * 100 / run_size);
