@@ -77,7 +77,7 @@ struct KVPair<String, V> {
   KVPair() = delete;
 };
 
-String* make_string(char* str, int len) {
+inline String* make_string(char* str, int len) {
   assert(str != nullptr && len >= 0);
   String* ret = (String*) malloc(len + sizeof(String));
   ret->len = len;
