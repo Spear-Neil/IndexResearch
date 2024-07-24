@@ -11,7 +11,7 @@ set(optiqllib ../OptiQL/Tree.cpp)
 set(masslib ../MassTree/kvthread.cc ../MassTree/compiler.cc ../MassTree/str.cc ../MassTree/string.cc ../MassTree/straccum.cc)
 set(whlib ../wormhole/kv.c ../wormhole/lib.c ../wormhole/wh.c)
 add_library(indexes SHARED index.cpp ${artlib} ${masslib} ${whlib} ${optiqllib})
-# disable NUMA_QNODE for debug, enabled in experiment evaluation
+# disable OMCS_OFFSET_NUMA_QNODE because it works bad in our machine
 target_compile_definitions(indexes PUBLIC OMCS_LOCK IS_CONTEXTFUL OMCS_OP_READ OMCS_OFFSET)# OMCS_OFFSET_NUMA_QNODE)
 
 add_executable(CacheMissTest cache_miss.cpp)
