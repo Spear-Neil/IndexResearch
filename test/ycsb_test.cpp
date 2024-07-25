@@ -42,11 +42,18 @@ double load_driver(Index<K, uint64_t>& index, std::vector<Request<K>>& loads, in
   std::atomic<int> ready{0};
   std::mutex lock;
 
+  size_t warm_up_size = loads.size() / 100;
+  for(size_t i = 0; i < warm_up_size; i++) {
+    assert(loads[i].type == INSERT);
+    index.insert(loads[i].kv);
+  }
+
   for(int tid = 0; tid < nthd; tid++) {
     workers.push_back(std::thread([&](int tid) {
       pin.pinning_thread_continuous(pthread_self());
-      size_t begin = tid * loads.size() / nthd;
-      size_t end = (tid + 1) * loads.size() / nthd;
+      size_t load_size = loads.size() - warm_up_size;
+      size_t begin = tid * load_size / nthd + warm_up_size;
+      size_t end = (tid + 1) * load_size / nthd + warm_up_size;
       ready.fetch_add(1);
       while(ready.load() != nthd);
 
