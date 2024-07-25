@@ -70,19 +70,36 @@ class Control {
 
       // waiting for other threads' modification
       if(spin++ >= limit) {
-        std::this_thread::yield();
+        using namespace std::chrono_literals;
+        if(limit == Config::kSpinInit) std::this_thread::yield();
+        else std::this_thread::sleep_for(1us);
         spin = 0, limit += Config::kSpinInc;
       }
     }
   }
 
   bool end_read(uint64_t version) {
-    // end atomic reading node, if locked or version has changed, retry
+    // end atomic reading node
+    int spin = 0, limit = Config::kSpinInit;
     uint64_t control = control_.load(load_order);
-    if((control & kLockBit) != 0 ||
-       (control & kVersionMask) != version)
+
+    // if locked, waiting for other threads' modification
+    while((control & kLockBit) != 0) {
+      if(spin++ >= limit) {
+        using namespace std::chrono_literals;
+        if(limit == Config::kSpinInit) std::this_thread::yield();
+        else std::this_thread::sleep_for(1us);
+        spin = 0, limit += Config::kSpinInc;
+      }
+      control = control_.load(load_order);
+    }
+
+    // if version has changed, retry
+    if((control & kVersionMask) != version)
       return false;
 
+    /* update with upsert interface will never update version
+     * so a lookup/scan can return without retry or acquire lock */
     return true;
   }
 
@@ -132,7 +149,9 @@ class Control {
         break;
 
       if(spin++ >= limit) {
-        std::this_thread::yield();
+        using namespace std::chrono_literals;
+        if(limit == Config::kSpinInit) std::this_thread::yield();
+        else std::this_thread::sleep_for(1us);
         spin = 0, limit += Config::kSpinInc;
       }
     }

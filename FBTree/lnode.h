@@ -231,7 +231,9 @@ class alignas(Config::kAlignSize) LeafNode {
         }
 
         if(spin++ >= limit) {
-          std::this_thread::yield();
+          using namespace std::chrono_literals;
+          if(limit == Config::kSpinInit) std::this_thread::yield();
+          else std::this_thread::sleep_for(1us);
           spin = 0, limit += Config::kSpinInc;
         }
         // if failed because other threads' updates, try again
@@ -708,7 +710,9 @@ class alignas(Config::kAlignSize) LeafNode<String, V> {
         }
 
         if(spin++ >= limit) {
-          std::this_thread::yield();
+          using namespace std::chrono_literals;
+          if(limit == Config::kSpinInit) std::this_thread::yield();
+          else std::this_thread::sleep_for(1us);
           spin = 0, limit += Config::kSpinInc;
         }
         // if failed because other threads' updates, try again
