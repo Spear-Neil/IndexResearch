@@ -11,6 +11,7 @@
 #include <cassert>
 #include <cstring>
 #include <vector>
+#include <map>
 #include "config.h"
 #include "type.h"
 #include "constant.h"
@@ -22,6 +23,11 @@
 #include "hash.h"
 #include "epoch.h"
 
+namespace FeatureBTree {
+
+using util::String;
+using util::Epoch;
+using util::compare;
 using util::popcount;
 using util::index_least1;
 using util::countl_zero;
@@ -30,9 +36,62 @@ using util::prefetcht0;
 using util::common_prefix;
 using util::aligned;
 using util::roundup;
-using util::Epoch;
 
-namespace FeatureBTree {
+/* store anchor keys in a contiguous memory block */
+class Extent {
+  int mlen_;   // total size of available space
+  int used_;   // used size of available space
+  int free_;   // freed size (anchor remove/update)
+  int huge_;   // offset, points to huge prefix
+  char mem_[]; // available space
+
+ public:
+  Extent() = delete;
+
+  void init(int len) {
+    assert(len % Config::kExtentSize == 0);
+    mlen_ = len - sizeof(Extent);
+    used_ = 0, free_ = 0, huge_ = 0;
+  }
+
+  // total size of extent, metadata and available space
+  int size() { return mlen_ + sizeof(Extent); }
+
+  // used size of extent, metadata and valid anchors
+  int used() { return used_ - free_ + sizeof(Extent); }
+
+  // left size of available space
+  int left() { return mlen_ - used_; }
+
+  String* huge() { return (String*) (mem_ + huge_); }
+
+  void huge(String* key) {
+    assert((ptrdiff_t(key) < ptrdiff_t(mem_ + used_)
+            && ptrdiff_t(key) >= ptrdiff_t(mem_)));
+    huge_ = ptrdiff_t(key) - ptrdiff_t(mem_);
+  }
+
+  String* make_anchor(String* key) {
+    // contiguously malloc a memory block
+    if(mlen_ - used_ >= key->len + sizeof(String)) {
+      auto* ret = (String*) (mem_ + used_);
+      String::make_string(ret, key->str, key->len);
+      used_ += key->len + sizeof(String);
+      return ret;
+    }
+    // no more space, require realloc
+    return nullptr;
+  }
+
+  void ruin_anchor(String* key) {
+    assert(ptrdiff_t(key) < ptrdiff_t(mem_ + used_)
+             && ptrdiff_t(key) >= ptrdiff_t(mem_));
+    // only record how many bytes are freed, because these bytes
+    // may be accessed by other threads, realloc if necessary
+    free_ += key->len + sizeof(String);
+  }
+};
+
 
 template<typename K>
 class alignas(Config::kAlignSize) InnerNode {
@@ -613,7 +672,6 @@ class alignas(Config::kAlignSize) InnerNode {
   }
 };
 
-
 template<>
 class alignas(Config::kAlignSize) InnerNode<String> {
   static constexpr int kNodeSize = Constant<String>::kInnerSize;
@@ -630,6 +688,7 @@ class alignas(Config::kAlignSize) InnerNode<String> {
    * 896 - 32 - 4 * 32 - 8 * 32 - 8 * 32 = 224, feature size: 4, node size: 32 */
   /* if kExtentOpt(false), anchors are actually stored in leaf nodes, inner nodes only
    * store pointers to anchors, else store anchors with contiguous memory in extent */
+
   Control control_;  // synchronization, memory/compiler order
   int knum_;         // the number of anchor/separator keys
   int plen_;         // the length of prefix, embed if possible

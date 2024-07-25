@@ -9,7 +9,6 @@
 #include "util.h"
 
 using namespace util;
-using FeatureBTree::String;
 
 typedef Index<uint64_t, uint64_t> IntIndex;
 typedef Index<String, uint64_t> StrIndex;

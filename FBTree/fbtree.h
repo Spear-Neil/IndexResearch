@@ -19,10 +19,12 @@
 #include "type.h"
 #include "epoch.h"
 
+namespace FeatureBTree {
+
+using util::String;
+using util::KVPair;
 using util::Epoch;
 using util::EpochGuard;
-
-namespace FeatureBTree {
 
 template<typename K, typename V>
 class alignas(64) FBTree {
@@ -37,7 +39,7 @@ class alignas(64) FBTree {
   void* root_track_[kMaxHeight];// track the root node
 
  public:
-  typedef FeatureBTree::KVPair<K, V> KVPair;
+  typedef util::KVPair<K, V> KVPair;
 
   class alignas(32) iterator {
     LeafNode* node_;   // the leaf node pointed by current iterator
@@ -307,13 +309,15 @@ class alignas(64) FBTree {
   }
 
   // kv should be allocated by malloc
-  KVPair* upsert(K key, const V& value) {
+  template<typename Value>
+  KVPair* upsert(K key, const Value& value) {
     void* kv = malloc(sizeof(KVPair));
     new(kv) KVPair{key, value};
     return upsert((KVPair*) kv);
   }
 
-  KVPair* upsert(K key, V&& value) {
+  template<typename Value>
+  KVPair* upsert(K key, Value&& value) {
     void* kv = malloc(sizeof(KVPair));
     new(kv) KVPair{key, std::move(value)};
     return upsert((KVPair*) kv);
@@ -416,7 +420,8 @@ class alignas(64) FBTree {
     return nullptr;  // the key doesn't exist
   }
 
-  KVPair* update(K key, const V& value) {
+  template<typename Value>
+  KVPair* update(K key, const Value& value) {
     void* kv = malloc(sizeof(KVPair));
     new(kv) KVPair{key, value};
     KVPair* ret = update((KVPair*) kv);
@@ -424,7 +429,8 @@ class alignas(64) FBTree {
     return ret;
   }
 
-  KVPair* update(K key, V&& value) {
+  template<typename Value>
+  KVPair* update(K key, Value&& value) {
     void* kv = malloc(sizeof(KVPair));
     new(kv) KVPair{key, std::move(value)};
     KVPair* ret = update((KVPair*) kv);
@@ -488,7 +494,7 @@ class alignas(64) FBTree<String, V> {
   void* root_track_[kMaxHeight];// track the root node
 
  public:
-  typedef FeatureBTree::KVPair<String, V> KVPair;
+  typedef util::KVPair<String, V> KVPair;
 
   class alignas(32) iterator {
     LeafNode* node_;   // the leaf node pointed by current iterator
@@ -768,25 +774,25 @@ class alignas(64) FBTree<String, V> {
   }
 
   // kv should be allocated by malloc
-  KVPair* upsert(char* key, int len, const V& value) {
-    KVPair* kv = (KVPair*) malloc(sizeof(KVPair) + len);
-    kv->value = value, kv->key.len = len;
-    memcpy(kv->key.str, key, len);
+  template<typename Value>
+  KVPair* upsert(char* key, int len, const Value& value) {
+    auto* kv = KVPair::make_kv(key, len, value);
     return upsert(kv);
   }
 
-  KVPair* upsert(char* key, int len, V&& value) {
-    KVPair* kv = (KVPair*) malloc(sizeof(KVPair) + len);
-    kv->value = std::move(value), kv->key.len = len;
-    memcpy(kv->key.str, key, len);
+  template<typename Value>
+  KVPair* upsert(char* key, int len, Value&& value) {
+    auto* kv = KVPair::make_kv(key, len, std::move(value));
     return upsert(kv);
   }
 
-  KVPair* upsert(const std::string& key, const V& value) {
+  template<typename Value>
+  KVPair* upsert(const std::string& key, const Value& value) {
     return upsert((char*) key.data(), key.size(), value);
   }
 
-  KVPair* upsert(const std::string& key, V&& value) {
+  template<typename Value>
+  KVPair* upsert(const std::string& key, Value&& value) {
     return upsert((char*) key.data(), key.size(), std::move(value));
   }
 
@@ -919,30 +925,30 @@ class alignas(64) FBTree<String, V> {
     return nullptr;
   }
 
-  KVPair* update(char* key, int len, const V& value) {
-    KVPair* kv = (KVPair*) malloc(sizeof(KVPair) + len);
-    kv->value = value, kv->key.len = len;
-    memcpy(kv->key.str, key, len);
+  template<typename Value>
+  KVPair* update(char* key, int len, const Value& value) {
+    auto* kv = KVPair::make_kv(key, len, value);
     KVPair* ret = update(kv);
     if(ret == nullptr) free(kv);
     return ret;
   }
 
-  KVPair* update(char* key, int len, V&& value) {
-    KVPair* kv = (KVPair*) malloc(sizeof(KVPair) + len);
-    kv->value = std::move(value), kv->key.len = len;
-    memcpy(kv->key.str, key, len);
+  template<typename Value>
+  KVPair* update(char* key, int len, Value&& value) {
+    auto* kv = KVPair::make_kv(key, len, std::move(value));
     KVPair* ret = update(kv);
     if(ret == nullptr) free(kv);
     return ret;
   }
 
-  KVPair* update(const std::string& key, const V& value) {
-    return upsert((char*) key.data(), key.size(), value);
+  template<typename Value>
+  KVPair* update(const std::string& key, const Value& value) {
+    return update((char*) key.data(), key.size(), value);
   }
 
-  KVPair* update(const std::string& key, V&& value) {
-    return upsert((char*) key.data(), key.size(), std::move(value));
+  template<typename Value>
+  KVPair* update(const std::string& key, Value&& value) {
+    return update((char*) key.data(), key.size(), std::move(value));
   }
 
   KVPair* lookup(String& key) {

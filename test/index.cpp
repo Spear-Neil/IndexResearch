@@ -28,6 +28,8 @@
 #include "../STX/tlx/tlx/container.hpp"
 
 using FeatureBTree::String;
+using util::EpochGuard;
+using util::byte_swap;
 
 template<>
 class IndexART<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {

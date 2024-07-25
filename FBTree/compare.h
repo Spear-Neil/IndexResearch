@@ -10,6 +10,8 @@
 #include "config.h"
 #include "simd.h"
 
+namespace FeatureBTree {
+
 using util::cmpeq_int8_simd128;
 using util::cmpeq_int8_simd256;
 using util::cmpeq_int8_simd512;
@@ -17,8 +19,6 @@ using util::cmpeq_int8_simd512;
 using util::cmplt_int8_simd128;
 using util::cmplt_int8_simd256;
 using util::cmplt_int8_simd512;
-
-namespace FeatureBTree {
 
 inline uint64_t compare_equal_16(void* p, char c) {
   return cmpeq_int8_simd128(p, c);

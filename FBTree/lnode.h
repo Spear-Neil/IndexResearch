@@ -13,6 +13,7 @@
 #include <thread>
 #include <vector>
 #include <tuple>
+#include <map>
 #include <algorithm>
 #include "config.h"
 #include "type.h"
@@ -24,12 +25,14 @@
 #include "macro.h"
 #include "log.h"
 
+namespace FeatureBTree {
+
+using util::String;
+using util::KVPair;
 using util::popcount;
 using util::index_least0;
 using util::index_least1;
 using util::hash;
-
-namespace FeatureBTree {
 
 template<typename K, typename V>
 class alignas(Config::kAlignSize) LeafNode {
@@ -37,7 +40,7 @@ class alignas(Config::kAlignSize) LeafNode {
   static constexpr int kMergeSize = Constant<K>::kLeafMergeSize;
   static constexpr std::memory_order load_order = std::memory_order_acquire;
   static constexpr std::memory_order store_order = std::memory_order_release;
-  typedef FeatureBTree::KVPair<K, V> KVPair;
+  typedef util::KVPair<K, V> KVPair;
 
   Control control_;       // synchronization, memory/compiler order
   uint64_t bitmap_;       // whether the corresponding kvs is used
@@ -495,7 +498,7 @@ class alignas(Config::kAlignSize) LeafNode<String, V> {
   static constexpr int kMergeSize = Constant<String>::kLeafMergeSize;
   static constexpr std::memory_order load_order = std::memory_order_acquire;
   static constexpr std::memory_order store_order = std::memory_order_release;
-  typedef FeatureBTree::KVPair<String, V> KVPair;
+  typedef util::KVPair<String, V> KVPair;
 
   Control control_;       // synchronization, memory/compiler order
   uint64_t bitmap_;       // whether the corresponding kvs is used
@@ -781,7 +784,7 @@ class alignas(Config::kAlignSize) LeafNode<String, V> {
         /* set corresponding variables before setting flag */
         sibling_ = (LeafNode*) rnode;
         String& high = *keys.back().first;
-        high_key_ = make_string(high.str, high.len);
+        high_key_ = String::make_string(high.str, high.len);
         control_.set_sibling();
       } else {
         // normal split, move half key-value pairs to the new node
@@ -808,7 +811,7 @@ class alignas(Config::kAlignSize) LeafNode<String, V> {
         CONDITION_ERROR(popcount(bitmap_) != kNodeSize / 2, "split error");
         sibling_ = (LeafNode*) rnode;
         String& high = *keys[kNodeSize / 2 - 1].first;
-        high_key_ = make_string(high.str, high.len);
+        high_key_ = String::make_string(high.str, high.len);
 
         if(!control_.has_sibling()) control_.set_sibling();
         else ((LeafNode*) rnode)->control_.set_sibling();

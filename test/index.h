@@ -2,7 +2,7 @@
 #define INDEXRESEARCH_INDEX_H
 
 #include <string>
-#include "../FBTree/type.h"
+#include "type.h"
 
 /* for experiment, garbage collection is not considered; insert/update
  * operations only modify the index, key-value is not considered; in
@@ -10,7 +10,7 @@
 template<typename K, typename V>
 class Index {
  public:
-  using KVType = FeatureBTree::KVPair<K, V>;
+  using KVType = util::KVPair<K, V>;
 
   virtual ~Index() = default;
 

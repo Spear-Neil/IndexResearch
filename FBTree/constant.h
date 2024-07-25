@@ -14,9 +14,10 @@
 #include "type.h"
 #include "common.h"
 
-using util::byte_swap;
-
 namespace FeatureBTree {
+
+using util::String;
+using util::byte_swap;
 
 template<typename T>
 struct Constant;
