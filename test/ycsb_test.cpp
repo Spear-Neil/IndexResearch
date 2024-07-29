@@ -38,9 +38,8 @@ double load_driver(Index<K, uint64_t>& index, std::vector<Request<K>>& loads, in
   pin.pinning_thread(0, 0, pthread_self());
   double load_tpt = 0;
   std::vector<std::thread> workers;
-  std::vector<double> throughput;
+  std::vector<double> throughput(nthd);
   std::atomic<int> ready{0};
-  std::mutex lock;
 
   size_t warm_up_size = loads.size() / 100;
   for(size_t i = 0; i < warm_up_size; i++) {
@@ -64,8 +63,7 @@ double load_driver(Index<K, uint64_t>& index, std::vector<Request<K>>& loads, in
         index.insert(loads[i].kv);
       }
       long drt = timer.duration_us();
-      std::lock_guard guard(lock);
-      throughput.push_back(double(end - begin) / drt);
+      throughput[tid] = double(end - begin) / drt;
     }, tid));
   }
 
@@ -77,15 +75,16 @@ double load_driver(Index<K, uint64_t>& index, std::vector<Request<K>>& loads, in
   return load_tpt;
 }
 
+
+/** Notes: we disabled Epoch in Workload C, some implementation are semi-finished with no performance overhead */
 template<typename K>
 double run_driver(Index<K, uint64_t>& index, std::vector<Request<K>>& runs, int nthd, int time) {
   PinningMap pin;
   pin.pinning_thread(0, 0, pthread_self());
   double run_tpt = 0;
   std::vector<std::thread> workers;
-  std::vector<double> throughput;
+  std::vector<double> throughput(nthd);
   std::atomic<int> ready{0};
-  std::mutex lock;
 
   for(int tid = 0; tid < nthd; tid++) {
     workers.push_back(std::thread([&](int tid) {
@@ -108,9 +107,7 @@ double run_driver(Index<K, uint64_t>& index, std::vector<Request<K>>& runs, int 
         if(req_cnt++ % 100000 == 0 && timer.duration_s() >= time) break;
       }
       long drt = timer.duration_us();
-
-      std::lock_guard guard(lock);
-      throughput.push_back(double(req_cnt) / drt);
+      throughput[tid] = double(req_cnt) / drt;
     }, tid));
   }
 
