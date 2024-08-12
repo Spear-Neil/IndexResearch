@@ -76,7 +76,7 @@ double load_driver(Index<K, uint64_t>& index, std::vector<Request<K>>& loads, in
 }
 
 
-/** Notes: we disabled Epoch in Workload C, some implementation are semi-finished with no performance overhead */
+/** Notes: we disabled all indexes' Epoch Reclaimer in Workload C, since some implementation are semi-finished with almost zero performance overhead */
 template<typename K>
 double run_driver(Index<K, uint64_t>& index, std::vector<Request<K>>& runs, int nthd, int time) {
   PinningMap pin;
