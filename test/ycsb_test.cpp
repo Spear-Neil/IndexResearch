@@ -159,9 +159,22 @@ int main(int argc, char* argv[]) {
     exit(-1);
   }
 
-  auto acquire_memory_usage = []() {
+  auto acquire_memory_usage = [index_type]() {
     MemStats stats;
-    return stats.allocated();
+    if(index_type != MASSTREE && index_type != WORMHOLE) {
+      return stats.allocated();
+    }
+
+    // Masstree and wormhole sometimes allocate memory via mmap
+    std::ifstream stat_fin("/proc/self/statm");
+    if(!stat_fin.good()) {
+      std::cerr << "-- failed to open statm" << std::endl;
+      exit(-1);
+    }
+    size_t vps, rps; // virtual page num, resident page num
+    stat_fin >> vps >> rps;
+    rps *= 4 * 1024;
+    return rps;
   };
 
   double load_tpt = 0, run_tpt = 0, avg_len = 0;
