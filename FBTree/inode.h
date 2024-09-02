@@ -525,6 +525,7 @@ class alignas(Config::kAlignSize) InnerNode {
       if(!pcmp) { // key is equal to prefix
         int idx, rid = 0, plen = plen_;
         uint64_t mask, eqmask = bitmap();
+        // ok, thanks to gcc/g++ and super-scalar, we do not have to do manual loop unrolling
         for(; rid + plen < kFeatureSize; rid++) {
           mask = compare_equal(features_[rid], ((char*) &key)[rid + plen]);
           mask = mask & eqmask;
