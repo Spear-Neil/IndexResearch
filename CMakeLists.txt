@@ -30,6 +30,7 @@ endif ()
 
 add_subdirectory(ARTOLC)
 add_subdirectory(BTreeOLC)
+add_subdirectory(FAST)
 add_subdirectory(FBTree)
 add_subdirectory(GoogleBTree)
 add_subdirectory(HOT)

@@ -76,7 +76,7 @@ double load_driver(Index<K, uint64_t>& index, std::vector<Request<K>>& loads, in
 }
 
 
-/** Notes: we disabled all indexes' Epoch Reclaimer in Workload C, since some implementation are semi-finished with almost zero performance overhead */
+/** Notes: we disabled all indexes' Epoch Reclaimer in Workload C, since some implementations are semi-finished with almost zero performance overhead */
 template<typename K>
 double run_driver(Index<K, uint64_t>& index, std::vector<Request<K>>& runs, int nthd, int time) {
   PinningMap pin;
@@ -165,7 +165,7 @@ int main(int argc, char* argv[]) {
       return stats.allocated();
     }
 
-    // Masstree and wormhole sometimes allocate memory via mmap
+    // Masstree and wormhole sometimes allocate memory directly via mmap
     std::ifstream stat_fin("/proc/self/statm");
     if(!stat_fin.good()) {
       std::cerr << "-- failed to open statm" << std::endl;

@@ -5,8 +5,8 @@
 #include "type.h"
 
 /* for experiment, garbage collection is not considered; insert/update
- * operations only modify the index, key-value is not considered; in
- * addition, some index does not implement remove interface */
+ * operations only modify the index, key-values are not considered; in
+ * addition, some indexes do not implement remove interface */
 template<typename K, typename V>
 class Index {
  public:

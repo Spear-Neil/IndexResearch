@@ -15,6 +15,9 @@ add_library(indexes SHARED index.cpp ${artlib} ${masslib} ${whlib} ${optiqllib})
 target_compile_definitions(indexes PUBLIC OMCS_LOCK IS_CONTEXTFUL OMCS_OP_READ OMCS_OFFSET)# OMCS_OFFSET_NUMA_QNODE)
 
 add_executable(CacheMissTest cache_miss.cpp)
+add_dependencies(CacheMissTest build_fast)
+target_link_directories(CacheMissTest PRIVATE ${CMAKE_BINARY_DIR}/fast64/target/release)
+target_link_libraries(CacheMissTest fast64 dl)
 
 link_libraries(indexes)
 add_executable(ycsb_build ycsb_build.cpp)
