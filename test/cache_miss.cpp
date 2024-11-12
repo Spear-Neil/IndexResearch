@@ -74,10 +74,15 @@ class IndexFast : public Index {
 
 /** Test Procedure for Cache Misses/Branch Misses of B-trees (STX B+-tree, FB+-tree, FAST),
  *  Phase 1: bulk_load a set of ordered uint64 keys (because FAST only supports bulk_load)
- *  Phase 2: perform a set of lookup operations following uniform or zipfian distribution
+ *  Phase 2: perform a set of lookup operations following Uniform or zipfian distribution
  *
  *  Due to a little optimization, the lookup performance of FB+-tree in such case (ordered
  *  insertions) may be higher than that when dynamically inserting these keys in random order.
+ *  It seems that this implementation of FAST stores key-value pairs in leaf nodes, while
+ *  FB+-tree stores key-value pairs via pointers in leaf nodes for generality and concurrency,
+ *  causing some overhead. Additionally, the implementation of FAST do not really define node
+ *  types, and thus it can go down to the leaf nodes without many branch instructions which are
+ *  necessary for implementations supporting dynamic insertion, e.g. determining node type.
  * */
 
 double run_driver(Index* tree, std::vector<uint64_t>& reqs, bool wi_query) {

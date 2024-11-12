@@ -6,7 +6,7 @@ FB+-tree blurs the lines between B+-trees and tries, allowing FB+-tree to benefi
 best case, FB+-tree almost becomes a trie, whereas in the worst case, it continues to function as a B+-tree. 
 In most cases, branch operations can be achieved by feature comparison thus enhancing its cache consciousness.
 Furthermore, feature comparison is implemented with SIMD instructions in a simple for loop, which mitigates 
-dependencies between instructions in comparison to binary search, allowing FB+-tree to leverage computational 
+dependences between instructions in comparison to binary search, allowing FB+-tree to leverage computational 
 and memory-level parallelism, such as, super-scalar, dynamic branch prediction, speculative execution and a 
 series of out-of-order execution techniques.
 
@@ -28,7 +28,9 @@ It highlights:
 # Index Structures
 There is an example in each index directory. 
 * [ARTOLC](https://github.com/wangziqi2016/index-microbench.git)
+* BLinkTree: lock-based B-link-tree, implemented based on the paper by YAO. et al. just a demo, may have some bugs
 * [B+-treeOLC](https://github.com/wangziqi2016/index-microbench.git)
+* [FAST](https://github.com/RyanMarcus/fast64.git): a simple implementation of FAST in Rust, only support bulk_load.
 * FB+-tree
 * [GoogleBtree](https://code.google.com/archive/p/cpp-btree/)
 * [HOT](https://github.com/speedskater/hot.git)

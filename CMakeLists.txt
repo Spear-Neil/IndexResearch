@@ -29,6 +29,7 @@ if (NOT (AVX512BW_ENABLE OR AVX2_ENABLE OR SSE2_ENABLE))
 endif ()
 
 add_subdirectory(ARTOLC)
+add_subdirectory(BLinkTree)
 add_subdirectory(BTreeOLC)
 add_subdirectory(FAST)
 add_subdirectory(FBTree)

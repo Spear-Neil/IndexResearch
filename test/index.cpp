@@ -26,6 +26,7 @@
 #include "../wormhole/wh.h"
 #include "../GoogleBTree/btree_map.h"
 #include "../STX/tlx/tlx/container.hpp"
+#include "../BLinkTree/b_link_tree.h"
 
 using FeatureBTree::String;
 using util::EpochGuard;
@@ -35,6 +36,11 @@ template<>
 class IndexART<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
   ART_OLC::Tree tree;
   Key max_key;
+
+  auto thread_info() {
+    static thread_local auto info = tree.getThreadInfo();
+    return info;
+  }
 
  public:
   IndexART() : tree([](TID tid, Key& key) { key.setInt(((KVType*) tid)->key); }) {
@@ -46,7 +52,7 @@ class IndexART<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
   std::string index_type() override { return "ARTOLC"; }
 
   void insert(KVType* kv) override {
-    static thread_local auto t = tree.getThreadInfo();
+    auto t = thread_info();
     Key k(kv->key);
     tree.insert(k, (TID) kv, t);
   }
@@ -56,7 +62,7 @@ class IndexART<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
   }
 
   bool lookup(const uint64_t& key, uint64_t& value) override {
-    static thread_local auto t = tree.getThreadInfo();
+    auto t = thread_info();
     Key k(key);
     KVType* kv = (KVType*) tree.lookup(k, t);
     if(kv == nullptr) return false;
@@ -65,7 +71,7 @@ class IndexART<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
   }
 
   int scan(const uint64_t& key, int num) override {
-    static thread_local auto t = tree.getThreadInfo();
+    auto t = thread_info();
     Key start(key);
     Key finish;
 
@@ -94,6 +100,11 @@ class IndexART<String, uint64_t> : public Index<String, uint64_t> {
     key.set(str, len), key[len] = '\0';
   }
 
+  auto thread_info() {
+    static thread_local auto info = tree.getThreadInfo();
+    return info;
+  }
+
  public:
   IndexART() : tree([](TID tid, Key& key) {
     KVType* kv = (KVType*) tid;
@@ -109,7 +120,7 @@ class IndexART<String, uint64_t> : public Index<String, uint64_t> {
   std::string index_type() override { return "ARTOLC"; }
 
   void insert(KVType* kv) override {
-    static thread_local auto t = tree.getThreadInfo();
+    auto t = thread_info();
     Key k;
     set_key(kv->key.str, kv->key.len, k);
     tree.insert(k, (TID) kv, t);
@@ -120,7 +131,7 @@ class IndexART<String, uint64_t> : public Index<String, uint64_t> {
   }
 
   bool lookup(const String& key, uint64_t& value) override {
-    static thread_local auto t = tree.getThreadInfo();
+    auto t = thread_info();
     Key k;
     set_key(key.str, key.len, k);
     KVType* kv = (KVType*) tree.lookup(k, t);
@@ -131,7 +142,7 @@ class IndexART<String, uint64_t> : public Index<String, uint64_t> {
   }
 
   int scan(const String& key, int num) override {
-    static thread_local auto t = tree.getThreadInfo();
+    auto t = thread_info();
     Key start;
     Key finish;
     set_key(key.str, key.len, start);
@@ -343,6 +354,8 @@ template<>
 class IndexFBTree<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
   FeatureBTree::FBTree<uint64_t, uint64_t> tree;
 
+  void epoch_guard() { static thread_local EpochGuard guard(tree.get_epoch()); }
+
  public:
   IndexFBTree() {}
 
@@ -351,17 +364,17 @@ class IndexFBTree<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
   std::string index_type() override { return "FBTree"; }
 
   void insert(KVType* kv) override {
-    EpochGuard guard(tree.get_epoch());
+    epoch_guard();
     tree.upsert(kv);
   }
 
   void update(KVType* kv) override {
-    EpochGuard guard(tree.get_epoch());
+    epoch_guard();
     tree.update(kv);
   }
 
   bool lookup(const uint64_t& key, uint64_t& value) override {
-    EpochGuard guard(tree.get_epoch());
+    epoch_guard();
     KVType* kv = tree.lookup(key);
     if(kv == nullptr) return false;
     value = kv->value;
@@ -369,7 +382,7 @@ class IndexFBTree<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
   }
 
   int scan(const uint64_t& key, int num) override {
-    EpochGuard guard(tree.get_epoch());
+    epoch_guard();
     auto it = tree.lower_bound(key);
     int count = 0;
     for(int i = 0; i < num; i++) {
@@ -384,6 +397,8 @@ template<>
 class IndexFBTree<String, uint64_t> : public Index<String, uint64_t> {
   FeatureBTree::FBTree<String, uint64_t> tree;
 
+  void epoch_guard() { static thread_local EpochGuard guard(tree.get_epoch()); }
+
  public:
   IndexFBTree() {}
 
@@ -392,17 +407,17 @@ class IndexFBTree<String, uint64_t> : public Index<String, uint64_t> {
   std::string index_type() override { return "FBTree"; }
 
   void insert(KVType* kv) override {
-    EpochGuard guard(tree.get_epoch());
+    epoch_guard();
     tree.upsert(kv);
   }
 
   void update(KVType* kv) override {
-    EpochGuard guard(tree.get_epoch());
+    epoch_guard();
     tree.update(kv);
   }
 
   bool lookup(const String& key, uint64_t& value) override {
-    EpochGuard guard(tree.get_epoch());
+    epoch_guard();
     auto kv = tree.lookup(const_cast<String&>(key));
     if(kv == nullptr) return false;
     value = kv->value;
@@ -410,7 +425,7 @@ class IndexFBTree<String, uint64_t> : public Index<String, uint64_t> {
   }
 
   int scan(const String& key, int num) override {
-    EpochGuard guard(tree.get_epoch());
+    epoch_guard();
     auto it = tree.lower_bound(const_cast<String&>(key));
     int count = 0;
     for(int i = 0; i < num; i++) {
@@ -588,6 +603,11 @@ template<>
 class IndexWH<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
   wormhole* wh;
 
+  auto get_ref() {
+    static thread_local wormref* whref = wh_ref(wh);
+    return whref;
+  }
+
  public:
   IndexWH() { wh = wh_create(); }
 
@@ -596,7 +616,7 @@ class IndexWH<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
   std::string index_type() override { return "WormHole"; }
 
   void insert(KVType* kv) override {
-    static thread_local wormref* whref = wh_ref(wh);
+    auto whref = get_ref();
     uint64_t k = byte_swap(kv->key);
     wh_put(whref, &k, 8, &kv->value, 8);
   }
@@ -604,14 +624,14 @@ class IndexWH<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
   void update(KVType* kv) override { insert(kv); }
 
   bool lookup(const uint64_t& key, uint64_t& value) override {
-    static thread_local wormref* whref = wh_ref(wh);
+    auto whref = get_ref();
     uint64_t k = byte_swap(key);
     uint32_t vlen;
     return wh_get(whref, &k, 8, &value, 8, &vlen);
   }
 
   int scan(const uint64_t& key, int num) override {
-    static thread_local wormref* whref = wh_ref(wh);
+    auto whref = get_ref();
     uint64_t k = byte_swap(key);
 
     wormhole_iter* iter = wh_iter_create(whref);
@@ -631,6 +651,11 @@ template<>
 class IndexWH<String, uint64_t> : public Index<String, uint64_t> {
   wormhole* wh;
 
+  auto get_ref() {
+    static thread_local wormref* whref = wh_ref(wh);
+    return whref;
+  }
+
  public:
   IndexWH() { wh = wh_create(); }
 
@@ -639,20 +664,20 @@ class IndexWH<String, uint64_t> : public Index<String, uint64_t> {
   std::string index_type() override { return "WormHole"; }
 
   void insert(KVType* kv) override {
-    static thread_local wormref* whref = wh_ref(wh);
+    auto whref = get_ref();
     wh_put(whref, kv->key.str, kv->key.len, &kv->value, 8);
   }
 
   void update(KVType* kv) override { insert(kv); }
 
   bool lookup(const String& key, uint64_t& value) override {
-    static thread_local wormref* whref = wh_ref(wh);
+    auto whref = get_ref();
     uint32_t vlen;
     return wh_get(whref, key.str, key.len, &value, 8, &vlen);
   }
 
   int scan(const String& key, int num) override {
-    static thread_local wormref* whref = wh_ref(wh);
+    auto whref = get_ref();
     wormhole_iter* iter = wh_iter_create(whref);
     wh_iter_seek(iter, key.str, key.len);
     int count = 0;
@@ -931,6 +956,8 @@ class IndexARTOptiQL<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
     }
   };
 
+  void thread_guard() { static thread_local Guard guard; }
+
  public:
   IndexARTOptiQL() {
     offset::init_qnodes();
@@ -943,19 +970,19 @@ class IndexARTOptiQL<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
   std::string index_type() override { return "ARTOptiQL"; }
 
   void insert(KVType* kv) override {
-    Guard guard;
+    thread_guard();
     Key k(kv->key);
     tree->insert(k, (TID) kv);
   }
 
   void update(KVType* kv) override {
-    Guard guard;
+    thread_guard();
     Key k(kv->key);
     tree->update(k, (TID) kv);
   }
 
   bool lookup(const uint64_t& key, uint64_t& value) override {
-    Guard guard;
+    thread_guard();
     Key k(key);
     KVType* kv = (KVType*) tree->lookup(k);
     if(kv == nullptr) return false;
@@ -964,7 +991,7 @@ class IndexARTOptiQL<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
   }
 
   int scan(const uint64_t& key, int num) override {
-    Guard guard;
+    thread_guard();
     Key k(key);
     size_t count = 0;
     TID tids[num];
@@ -1012,6 +1039,8 @@ class IndexARTOptiQL<String, uint64_t> : public Index<String, uint64_t> {
     }
   };
 
+  void thread_guard() { static thread_local Guard guard; }
+
  public:
   IndexARTOptiQL() {
     offset::init_qnodes();
@@ -1024,21 +1053,21 @@ class IndexARTOptiQL<String, uint64_t> : public Index<String, uint64_t> {
   std::string index_type() override { return "ARTOptiQL"; }
 
   void insert(KVType* kv) override {
-    Guard guard;
+    thread_guard();
     Key k;
     set_key(kv->key.str, kv->key.len, k);
     tree->insert(k, (TID) kv);
   }
 
   void update(KVType* kv) override {
-    Guard guard;
+    thread_guard();
     Key k;
     set_key(kv->key.str, kv->key.len, k);
     tree->update(k, (TID) kv);
   }
 
   bool lookup(const String& key, uint64_t& value) override {
-    Guard guard;
+    thread_guard();
     Key k;
     set_key(key.str, key.len, k);
     KVType* kv = (KVType*) tree->lookup(k);
@@ -1048,7 +1077,7 @@ class IndexARTOptiQL<String, uint64_t> : public Index<String, uint64_t> {
   }
 
   int scan(const String& key, int num) override {
-    Guard guard;
+    thread_guard();
     Key k;
     set_key(key.str, key.len, k);
     size_t count = 0;
@@ -1056,6 +1085,37 @@ class IndexARTOptiQL<String, uint64_t> : public Index<String, uint64_t> {
     // similar bugs also in ARTOptiQL, endless loop
     tree->lookupRange(k, tids, num, count);
     return count;
+  }
+};
+
+template<>
+class IndexBlink<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
+  BLinkTree<uint64_t, KVType*> tree;
+
+ public:
+  IndexBlink() {}
+
+  ~IndexBlink() override {}
+
+  std::string index_type() override { return "BlinkTree"; }
+
+  void insert(KVType* kv) override { tree.Insert(kv->key, kv); }
+
+  void update(KVType* kv) override { tree.Update(kv->key, kv); }
+
+  bool lookup(const uint64_t& key, uint64_t& value) override {
+    KVType* kv = nullptr;
+    bool find = tree.Search(key, kv);
+    if(!find) return false;
+    value = kv->value;
+    return true;
+  }
+
+  int scan(const uint64_t& key, int num) override {
+    std::vector<std::pair<uint64_t, KVType*>> pairs;
+    pairs.reserve(num);
+    tree.ScanFixed(key, num, pairs);
+    return pairs.size();
   }
 };
 
@@ -1080,6 +1140,8 @@ Index<uint64_t, uint64_t>* IndexFactory<uint64_t, uint64_t>::get_index(INDEX_TYP
       return new IndexSTX<uint64_t, uint64_t>();
     case ARTOptiQL:
       return new IndexARTOptiQL<uint64_t, uint64_t>();
+    case BLink:
+      return new IndexBlink<uint64_t, uint64_t>();
     default:
       return nullptr;
   }
