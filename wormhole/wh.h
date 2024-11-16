@@ -67,6 +67,9 @@ wormhole_iter_kref(struct wormhole_iter * const iter, struct kref * const kref);
   extern bool
 wormhole_iter_kvref(struct wormhole_iter * const iter, struct kvref * const kvref);
 
+  // added by spearneil, for experiment
+  extern struct kv* wormhole_iter_kv(struct wormhole_iter * const iter);
+
   extern void
 wormhole_iter_skip1(struct wormhole_iter * const iter);
 

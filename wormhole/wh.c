@@ -3212,6 +3212,12 @@ wormhole_iter_kvref(struct wormhole_iter * const iter, struct kvref * const kvre
   return false;
 }
 
+struct kv* wormhole_iter_kv(struct wormhole_iter * const iter){
+   return wormhole_iter_current(iter);
+  }
+
+
+
   void
 wormhole_iter_skip1(struct wormhole_iter * const iter)
 {

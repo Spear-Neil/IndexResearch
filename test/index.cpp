@@ -639,6 +639,7 @@ class IndexWH<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
     int count = 0;
     for(int i = 0; i < num; i++) {
       if(!wh_iter_valid(iter)) break;
+      wormhole_iter_kv(iter); // get kv pointer, but do not access kv
       count++, wh_iter_skip1(iter);
     }
     wh_iter_destroy(iter);
@@ -683,6 +684,7 @@ class IndexWH<String, uint64_t> : public Index<String, uint64_t> {
     int count = 0;
     for(int i = 0; i < num; i++) {
       if(!wh_iter_valid(iter)) break;
+      wormhole_iter_kv(iter); // get kv pointer, but do not access kv
       count++, wh_iter_skip1(iter);
     }
     wh_iter_destroy(iter);
