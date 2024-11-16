@@ -10,11 +10,6 @@
 #include "idx/contenthelpers/OptionalValue.hpp"
 #include "../BTreeOLC/BTreeOLC_child_layout.h"
 #include "../FBTree/fbtree.h"
-
-#undef prefetch
-#undef likely
-#undef unlikely
-
 #include "../MassTree/masstree.hh"
 #include "../MassTree/kvthread.hh"
 #include "../MassTree/masstree_struct.hh"
@@ -27,6 +22,9 @@
 #include "../GoogleBTree/btree_map.h"
 #include "../STX/tlx/tlx/container.hpp"
 #include "../BLinkTree/b_link_tree.h"
+#include "../OptiQL/Tree.h"
+#include "../OptiQL/latches/OMCSOffset.h"
+#include "../ARTOLC/Epoche.cpp"
 
 using FeatureBTree::String;
 using util::EpochGuard;
@@ -925,10 +923,6 @@ class IndexSTX<String, uint64_t> : public Index<String, uint64_t> {
     return count;
   }
 };
-
-#include "../OptiQL/Tree.h"
-#include "../OptiQL/latches/OMCSOffset.h"
-#include "../ARTOLC/Epoche.cpp"
 
 template<>
 class IndexARTOptiQL<uint64_t, uint64_t> : public Index<uint64_t, uint64_t> {
