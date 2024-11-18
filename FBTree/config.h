@@ -11,6 +11,13 @@
 
 namespace FeatureBTree {
 
+/** For string keys, kFeatureSize = 8, kInnerSize = 32 is be a better config, cause it just
+  * makes the tree 1 level deeper than that of 64, while it highly mitigates the probability
+  * of suffix binary search. For binary keys, kInnerSize = 64 is a better config. We config
+  * kFeatureSize = 4, kInnerSize = 64 in our experimental evaluation for uniformity.
+  * All these configs can be configured independently in constant.h for different key types.
+  * */
+
 enum CompareMode { SIMD512, SIMD256, SIMD128 };
 
 struct Config {
