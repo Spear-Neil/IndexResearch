@@ -75,5 +75,7 @@ git submodule update
 4. Run the example `./FBTree/FBTreeExample 10000000 1 1`
 
 # Notes
+* Currently, we do not implement a single-threaded version. We will later implement a single-threaded version with
+  more optimizations, such as embedding key-value into leaf nodes, larger leaf nodes (128), a more rational split tactic.
 * To evaluate the performance/scalability of concurrent remove, disable `free` interface to mitigate cross-thread 
   memory release overhead (for example, acquire a lock on an arena in jemalloc)

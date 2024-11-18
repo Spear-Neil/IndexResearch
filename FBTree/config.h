@@ -11,10 +11,15 @@
 
 namespace FeatureBTree {
 
-/** For string keys, kFeatureSize = 8, kInnerSize = 32 is be a better config, cause it just
-  * makes the tree 1 level deeper than that of 64, while it highly mitigates the probability
-  * of suffix binary search. For binary keys, kInnerSize = 64 is a better config. We config
-  * kFeatureSize = 4, kInnerSize = 64 in our experimental evaluation for uniformity.
+/** For string keys, kFeatureSize = 8, kInnerSize = 32 seems to be a better config, cause it may mitigate the probability
+  * of suffix binary search. However, it also makes the tree 1 level deeper than that of kInnerSize = 64, end up with
+  * almost the same overhead. A larger kFeatureSize may make sense in concurrent environment (better memory bandwidth
+  * utilization). But it may bring additional overhead in single-threaded environment because the latency increases when
+  * accessing a larger memory block. Due to hardware prefetch/memory-level parallelism, on our Intel Xeon Gold 6248R CPU
+  * and Core 12700KF CPU, read sequential 64/128/256 bytes have almost the same latency. For binary keys, kInnerSize = 64
+  * is a better config. We thus config kFeatureSize = 4, kInnerSize = 64 for better single-threaded throughput and space
+  * efficiency in our experimental evaluation.
+  *
   * All these configs can be configured independently in constant.h for different key types.
   * */
 
