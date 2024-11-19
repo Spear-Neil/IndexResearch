@@ -101,7 +101,7 @@ int main(int argc, char* argv[]) {
   std::vector<std::pair<size_t, int>> reqs;
   reqs.reserve(req_cnt);
   ZipfGenerator<size_t> req_gen(0, node_cnt);
-  UnifGenerator<int> len_gen(0, kMaxScanLen);
+  UnifGenerator<int> len_gen(1, kMaxScanLen);
   for(size_t i = 0; i < req_cnt; i++) {
     reqs.emplace_back(req_gen(), len_gen());
   }
