@@ -85,6 +85,8 @@ int main(int argc, char* argv[]) {
   std::cout << "[Info]: " << (node_type ? "IndirectNode, " : "InorderNode, ") << node_cnt << " nodes, "
             << req_cnt << " operations, " << run_time << " seconds, " << nthd << " threads" << std::endl;
 
+  PinningMap pin;
+  pin.pinning_thread(0,0, pthread_self());
   std::cout << GRAPH_FONT_GREEN << "[Info]: node generation ... " << GRAPH_ATTR_NONE << std::endl;
   NodeBase** nodes = new NodeBase* [node_cnt];
   if(node_type) {
@@ -107,7 +109,6 @@ int main(int argc, char* argv[]) {
   }
 
   std::cout << GRAPH_FONT_GREEN << "[Info]: test start ... " << GRAPH_ATTR_NONE << std::endl;
-  PinningMap pin;
   std::vector<std::thread> workers;
   double throughput[nthd], total_tpt = 0;
   size_t nosense = 0;
