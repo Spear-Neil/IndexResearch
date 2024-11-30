@@ -43,6 +43,7 @@ There is an example in each index directory.
 * x86-64 CPU supporting SSE2 or AVX2 or AVX512 instruction set
 * intel Threading Building Blocks (TBB) (`apt install libtbb-dev`)
 * jemalloc (`apt install libjemalloc-dev`)
+* google-glog (`apt install libgoogle-glog-dev`)
 * a C++17 compliant compiler
 
 # API
