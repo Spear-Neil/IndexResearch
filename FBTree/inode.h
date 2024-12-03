@@ -36,6 +36,8 @@ using util::prefetcht0;
 using util::common_prefix;
 using util::aligned;
 using util::roundup;
+using util::branch_likely;
+using util::branch_unlikely;
 
 /* store anchor keys in a contiguous memory block */
 class Extent {
@@ -144,9 +146,7 @@ class alignas(Config::kAlignSize) InnerNode {
     }
 
     // key is equal to prefix
-    if(pid == plen_) {
-      return 0;
-    }
+    if(pid == plen_) { return 0; }
 
     // key is less than prefix
     if(((char*) &key)[pid] < prefix_[pid]) {
@@ -171,9 +171,7 @@ class alignas(Config::kAlignSize) InnerNode {
     }
 
     // key is equal to prefix
-    if(pid == plen_) {
-      return 0;
-    }
+    if(pid == plen_) { return 0; }
 
     // key is less than prefix
     if(((char*) &key)[pid] < prefix_[pid]) {
@@ -515,14 +513,14 @@ class alignas(Config::kAlignSize) InnerNode {
       to_sibling = false; // make sure to_sibling is initialized with false even retry
       init_version = control_.begin_read();
 
-      if(control_.deleted()) { // current node has been deleted, jump to its left node
+      if(branch_unlikely(control_.deleted())) { // current node has been deleted, jump to its left node
         to_sibling = true, next = next_;
         CONDITION_ERROR(next == nullptr, "next can't be null");
         break;
       }
 
       int pcmp = to_next_phase1(key, next, to_sibling);
-      if(!pcmp) { // key is equal to prefix
+      if(branch_likely(!pcmp)) { // key is equal to prefix
         int idx, rid = 0, plen = plen_;
         uint64_t mask, eqmask = bitmap();
         // ok, thanks to gcc/g++, dynamic hardware scheduling, speculation and super-scalar,
@@ -534,7 +532,7 @@ class alignas(Config::kAlignSize) InnerNode {
           eqmask = mask;
         }
 
-        if(rid + plen < kFeatureSize) { // less comparison
+        if(branch_likely(rid + plen < kFeatureSize)) { // less comparison
           mask = compare_less(features_[rid], ((char*) &key)[rid + plen]);
           mask = mask & eqmask;
 
@@ -549,14 +547,14 @@ class alignas(Config::kAlignSize) InnerNode {
           idx = index_least1(eqmask);
         }
 
-        if(idx == knum_) {
+        if(branch_unlikely(idx == knum_)) {
           next = next_; // key is greater than all separator
           if(control_.has_sibling()) to_sibling = true;
         } else { next = children_[idx]; }
       }
 
       CONDITION_ERROR(next == nullptr, "next can't be null");
-      if(control_.end_read(init_version)) break;
+      if(branch_likely(control_.end_read(init_version))) break;
     }
 
     return to_sibling;
@@ -1133,7 +1131,7 @@ class alignas(Config::kAlignSize) InnerNode<String> {
       to_sibling = false; // make sure to_sibling is initialized with false even retry
       version = control_.begin_read();
 
-      if(control_.deleted()) { // current node has been deleted, jump to its left node
+      if(branch_unlikely(control_.deleted())) { // current node has been deleted, jump to its left node
         to_sibling = true, next = next_;
         CONDITION_ERROR(next == nullptr, "next can't be null");
         break;
@@ -1142,7 +1140,7 @@ class alignas(Config::kAlignSize) InnerNode<String> {
       // phase 1: prefix comparison
       int pcmp = to_next_phase1(key, next, to_sibling);
 
-      if(!pcmp) { // prefix of key is equal to node prefix
+      if(branch_likely(!pcmp)) { // prefix of key is equal to node prefix
         int idx, rid, plen = plen_; // rid: row index, from higher byte to lower byte
         if(key.len < plen) continue; // current node has modified by other threads
 
@@ -1176,7 +1174,7 @@ class alignas(Config::kAlignSize) InnerNode<String> {
           idx = suffix_bs(key, plen + cmps, lid, hid);
         }
 
-        if(idx == knum_) {
+        if(branch_unlikely(idx == knum_)) {
           next = next_; // key is greater than all separators
           if(control_.has_sibling()) to_sibling = true;
           assert(next != nullptr);
@@ -1186,7 +1184,7 @@ class alignas(Config::kAlignSize) InnerNode<String> {
         }
       }
 
-      if(control_.end_read(version)) break;
+      if(branch_likely(control_.end_read(version))) break;
     }
 
     return to_sibling;

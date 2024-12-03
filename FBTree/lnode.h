@@ -33,6 +33,8 @@ using util::popcount;
 using util::index_least0;
 using util::index_least1;
 using util::hash;
+using util::branch_likely;
+using util::branch_unlikely;
 
 template<typename K, typename V>
 class alignas(Config::kAlignSize) LeafNode {
@@ -186,7 +188,7 @@ class alignas(Config::kAlignSize) LeafNode {
 
   bool to_sibling(K key, void*& next) {
     // key must be normal encoding form
-    if(control_.deleted()) { // current node has been deleted
+    if(branch_unlikely(control_.deleted())) { // current node has been deleted
       next = sibling_;
       CONDITION_ERROR(next == nullptr, "to_sibling error: next == nullptr");
       return true;
@@ -651,7 +653,7 @@ class alignas(Config::kAlignSize) LeafNode<String, V> {
   }
 
   bool to_sibling(String& key, void*& next, Control* parent, uint64_t pver) {
-    if(control_.deleted()) { // current node has been deleted
+    if(branch_unlikely(control_.deleted())) { // current node has been deleted
       next = sibling_;
       CONDITION_ERROR(next == nullptr, "to_sibling error: next == nullptr");
       return true;
