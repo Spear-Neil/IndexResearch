@@ -87,10 +87,10 @@ class alignas(Config::kAlignSize) LeafNode {
   }
 
   void merge(void*& merged, K& mid) {
-    CONDITION_ERROR(merged != nullptr, "merged node is uninitialized");
+    DEBUG_COND_ERROR(merged != nullptr, "merged node is uninitialized");
     if(control_.has_sibling()) {  // only merge with the right sibling node
       LeafNode* rnode = sibling_;
-      CONDITION_ERROR(rnode == nullptr, "sibling is equal to null");
+      DEBUG_COND_ERROR(rnode == nullptr, "sibling is equal to null");
       int lnkey = popcount(bitmap_);
       int rnkey = popcount(rnode->bitmap_);
       // if rnkey == 0 (the rightmost leaf), not merge immediately
@@ -190,13 +190,13 @@ class alignas(Config::kAlignSize) LeafNode {
     // key must be normal encoding form
     if(branch_unlikely(control_.deleted())) { // current node has been deleted
       next = sibling_;
-      CONDITION_ERROR(next == nullptr, "to_sibling error: next == nullptr");
+      DEBUG_COND_ERROR(next == nullptr, "to_sibling error: next == nullptr");
       return true;
     }
 
     if(control_.has_sibling() && high_key_ < key) {
       next = sibling_;
-      CONDITION_ERROR(next == nullptr, "to_sibling error: next == nullptr");
+      DEBUG_COND_ERROR(next == nullptr, "to_sibling error: next == nullptr");
       return true;
     }
     return false;
@@ -330,9 +330,9 @@ class alignas(Config::kAlignSize) LeafNode {
         ((LeafNode*) rnode)->sibling_ = sibling_;
         ((LeafNode*) rnode)->high_key_ = high_key_;
 
-        CONDITION_ERROR(popcount(mask) != kNodeSize / 2, "split error");
+        DEBUG_COND_ERROR(popcount(mask) != kNodeSize / 2, "split error");
         bitmap_ &= ~mask;  // remove keys in leaf node
-        CONDITION_ERROR(popcount(bitmap_) != kNodeSize / 2, "split error");
+        DEBUG_COND_ERROR(popcount(bitmap_) != kNodeSize / 2, "split error");
         sibling_ = (LeafNode*) rnode;
         high_key_ = keys[kNodeSize / 2 - 1].first;
 
@@ -348,7 +348,7 @@ class alignas(Config::kAlignSize) LeafNode {
       mid = encode_convert(high_key_);
     }
 
-    CONDITION_ERROR((node->bitmap_ & (0x01ul << idx)) != 0, "insert error");
+    DEBUG_COND_ERROR((node->bitmap_ & (0x01ul << idx)) != 0, "insert error");
     //insert the key into node
     node->kvs_[idx].store(kv, store_order);
     node->tags_[idx] = tag;
@@ -547,10 +547,10 @@ class alignas(Config::kAlignSize) LeafNode<String, V> {
   }
 
   void merge(void*& merged, String*& mid) {
-    CONDITION_ERROR(merged != nullptr, "merged node is uninitialized");
+    DEBUG_COND_ERROR(merged != nullptr, "merged node is uninitialized");
     if(control_.has_sibling()) {  // only merge with the right sibling node
       LeafNode* rnode = sibling_;
-      CONDITION_ERROR(rnode == nullptr, "sibling is equal to null");
+      DEBUG_COND_ERROR(rnode == nullptr, "sibling is equal to null");
       int lnkey = popcount(bitmap_);
       int rnkey = popcount(rnode->bitmap_);
       // if rnkey == 0 (the rightmost leaf), not merge immediately
@@ -655,7 +655,7 @@ class alignas(Config::kAlignSize) LeafNode<String, V> {
   bool to_sibling(String& key, void*& next, Control* parent, uint64_t pver) {
     if(branch_unlikely(control_.deleted())) { // current node has been deleted
       next = sibling_;
-      CONDITION_ERROR(next == nullptr, "to_sibling error: next == nullptr");
+      DEBUG_COND_ERROR(next == nullptr, "to_sibling error: next == nullptr");
       return true;
     }
 
@@ -672,7 +672,7 @@ class alignas(Config::kAlignSize) LeafNode<String, V> {
       if(control_.has_sibling() && *high_key_ < key) {
         // current node is not the rightmost node and key is greater than high_key, move to sibling
         next = sibling_;
-        CONDITION_ERROR(next == nullptr, "to_sibling error: next == nullptr");
+        DEBUG_COND_ERROR(next == nullptr, "to_sibling error: next == nullptr");
         return true;
       }
     }
@@ -741,7 +741,7 @@ class alignas(Config::kAlignSize) LeafNode<String, V> {
     while(mask) {  // check whether the key exists or not
       idx = index_least1(mask);
       KVPair* old = kvs_[idx].load(load_order);
-      CONDITION_ERROR(old == nullptr, "unknown error");
+      DEBUG_COND_ERROR(old == nullptr, "unknown error");
       // old can't be nullptr, must be a valid pointer
       if(kv->key == old->key) {
         // using exchange, because other update operations may happen concurrently
@@ -812,9 +812,9 @@ class alignas(Config::kAlignSize) LeafNode<String, V> {
         ((LeafNode*) rnode)->sibling_ = sibling_;
         ((LeafNode*) rnode)->high_key_ = high_key_;
 
-        CONDITION_ERROR(popcount(mask) != kNodeSize / 2, "split error");
+        DEBUG_COND_ERROR(popcount(mask) != kNodeSize / 2, "split error");
         bitmap_ &= ~mask;  // remove keys in leaf node
-        CONDITION_ERROR(popcount(bitmap_) != kNodeSize / 2, "split error");
+        DEBUG_COND_ERROR(popcount(bitmap_) != kNodeSize / 2, "split error");
         sibling_ = (LeafNode*) rnode;
         String& high = *keys[kNodeSize / 2 - 1].first;
         high_key_ = String::make_string(high.str, high.len);
@@ -831,7 +831,7 @@ class alignas(Config::kAlignSize) LeafNode<String, V> {
       mid = high_key_;
     }
 
-    CONDITION_ERROR((node->bitmap_ & (0x01ul << idx)) != 0, "insert error");
+    DEBUG_COND_ERROR((node->bitmap_ & (0x01ul << idx)) != 0, "insert error");
     //insert the key into node
     node->kvs_[idx].store(kv, store_order);
     node->tags_[idx] = tag;

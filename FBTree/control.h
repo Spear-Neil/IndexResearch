@@ -105,37 +105,37 @@ class Control {
 
   void begin_splitting() {
     uint64_t old = control_.fetch_add(kSplitOne);
-    CONDITION_ERROR((old & kSplitMask) == kSplitMask, "fatal error, split token overflow!");
+    DEBUG_COND_ERROR((old & kSplitMask) == kSplitMask, "fatal error, split token overflow!");
   }
 
   void end_splitting() {
     uint64_t old = control_.fetch_sub(kSplitOne);
-    CONDITION_ERROR((old & kSplitMask) == 0, "fatal error, split token under flow!");
+    DEBUG_COND_ERROR((old & kSplitMask) == 0, "fatal error, split token under flow!");
   }
 
   void set_order() {
     uint64_t old = control_.fetch_add(kOrderBit);
-    CONDITION_ERROR((old & kOrderBit) != 0, "fatal error, kv pairs were originally ordered");
+    DEBUG_COND_ERROR((old & kOrderBit) != 0, "fatal error, kv pairs were originally ordered");
   }
 
   void clear_order() {
     uint64_t old = control_.fetch_sub(kOrderBit);
-    CONDITION_ERROR((old & kOrderBit) == 0, "fatal error, kv pairs were originally unordered");
+    DEBUG_COND_ERROR((old & kOrderBit) == 0, "fatal error, kv pairs were originally unordered");
   }
 
   void set_delete() {
     uint64_t old = control_.fetch_add(kDelBit);
-    CONDITION_ERROR((old & kDelBit) != 0, "fatal error, delete a node that had been deleted!");
+    DEBUG_COND_ERROR((old & kDelBit) != 0, "fatal error, delete a node that had been deleted!");
   }
 
   void set_sibling() {
     uint64_t old = control_.fetch_add(kSiblingBit);
-    CONDITION_ERROR((old & kSiblingBit) != 0, "fatal error, current node already has sibling!");
+    DEBUG_COND_ERROR((old & kSiblingBit) != 0, "fatal error, current node already has sibling!");
   }
 
   void clear_sibling() {
     uint64_t old = control_.fetch_sub(kSiblingBit);
-    CONDITION_ERROR((old & kSiblingBit) == 0, "fatal error, current node doesn't have sibling!");
+    DEBUG_COND_ERROR((old & kSiblingBit) == 0, "fatal error, current node doesn't have sibling!");
   }
 
   void latch_exclusive() {
@@ -162,7 +162,7 @@ class Control {
   }
 
   void unlatch_exclusive() {
-    CONDITION_ERROR((control_.load(load_order) & kLockBit) == 0, "unlatch error");
+    DEBUG_COND_ERROR((control_.load(load_order) & kLockBit) == 0, "unlatch error");
     control_.fetch_sub(kLockBit);
   }
 };
