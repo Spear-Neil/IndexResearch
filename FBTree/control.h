@@ -10,7 +10,7 @@
 #include <atomic>
 #include <thread>
 #include <cassert>
-#include "log.h"
+#include "debug.h"
 #include "config.h"
 
 namespace FeatureBTree {

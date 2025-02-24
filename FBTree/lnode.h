@@ -23,7 +23,7 @@
 #include "hash.h"
 #include "common.h"
 #include "macro.h"
-#include "log.h"
+#include "debug.h"
 
 namespace FeatureBTree {
 

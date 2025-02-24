@@ -19,7 +19,7 @@
 #include "control.h"
 #include "common.h"
 #include "macro.h"
-#include "log.h"
+#include "debug.h"
 #include "hash.h"
 #include "epoch.h"
 
