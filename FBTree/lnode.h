@@ -80,7 +80,7 @@ class alignas(Config::kAlignSize) LeafNode {
   }
 
   uint64_t bitmap(int size) {
-    if(kNodeSize == 64) {
+    if(kNodeSize == 64) { // avoid undefined behavior in shift operation
       if(size == kNodeSize) { return 0x00ul - 1; }
       else { return (0x01ul << size) - 1; }
     } else { return (0x01ul << size) - 1; }
@@ -540,7 +540,7 @@ class alignas(Config::kAlignSize) LeafNode<String, V> {
   }
 
   uint64_t bitmap(int size) {
-    if(kNodeSize == 64) {
+    if(kNodeSize == 64) { // avoid undefined behavior in shift operation
       if(size == kNodeSize) { return 0x00ul - 1; }
       else { return (0x01ul << size) - 1; }
     } else { return (0x01ul << size) - 1; }

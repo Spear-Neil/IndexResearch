@@ -86,7 +86,7 @@ int main(int argc, char* argv[]) {
             << req_cnt << " operations, " << run_time << " seconds, " << nthd << " threads" << std::endl;
 
   PinningMap pin;
-  pin.pinning_thread(0,0, pthread_self());
+  pin.pinning_thread(0, 0, pthread_self());
   std::cout << GRAPH_FONT_GREEN << "[Info]: node generation ... " << GRAPH_ATTR_NONE << std::endl;
   NodeBase** nodes = new NodeBase* [node_cnt];
   if(node_type) {

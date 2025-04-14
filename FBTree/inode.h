@@ -131,7 +131,7 @@ class alignas(Config::kAlignSize) InnerNode {
 
   uint64_t bitmap() {
     DEBUG_COND_ERROR(knum_ < 0 || knum_ > kNodeSize, "error knum");
-    if(kNodeSize == 64) {
+    if(kNodeSize == 64) { // avoid undefined behavior in shift operation
       if(knum_ == kNodeSize) { return 0x00ul - 1; }
       else { return (0x01ul << knum_) - 1; }
     } else { return (0x01ul << knum_) - 1; }
@@ -724,7 +724,7 @@ class alignas(Config::kAlignSize) InnerNode<String> {
 
   uint64_t bitmap() {
     DEBUG_COND_ERROR(knum_ < 0 || knum_ > kNodeSize, "error knum");
-    if(kNodeSize == 64) {
+    if(kNodeSize == 64) { // avoid undefined behavior in shift operation
       if(knum_ == kNodeSize) { return 0x00ul - 1; }
       else { return (0x01ul << knum_) - 1; }
     } else { return (0x01ul << knum_) - 1; }
