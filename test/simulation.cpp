@@ -9,7 +9,7 @@ using namespace util;
 typedef KVPair<uint64_t, uint64_t> KVType;
 constexpr int kNodeSize = 128;
 constexpr int kMaxScanLen = 100;
-constexpr bool kReadFiled = true;
+constexpr bool kReadField = true;
 static_assert(kMaxScanLen <= kNodeSize);
 
 class NodeBase {
@@ -31,7 +31,7 @@ class InorderNode : public NodeBase {
   int scan(int len) override {
     int sum = 0;
     for(int i = 0; i < len; i++) {
-      if(kReadFiled) sum += kvs_[i]->value;
+      if(kReadField) sum += kvs_[i]->value;
       else sum += (uint64_t) kvs_[i];
     }
     return sum;
@@ -56,7 +56,7 @@ class IndirectNode : public NodeBase {
   int scan(int len) override {
     int sum = 0;
     for(int i = 0; i < len; i++) {
-      if(kReadFiled) sum += kvs_[seq_[i]]->value;
+      if(kReadField) sum += kvs_[seq_[i]]->value;
       else sum += (uint64_t) kvs_[seq_[i]];
     }
     return sum;
