@@ -80,3 +80,4 @@ git submodule update
   more optimizations, such as embedding key-value into leaf nodes, larger leaf nodes (128), a more rational split tactic.
 * To evaluate the performance/scalability of concurrent remove, disable `free` interface to mitigate cross-thread 
   memory release overhead (for example, acquire a lock on an arena in jemalloc)
+* previous implementation during development: https://gitee.com/spearNeil/blinktree.git and https://gitee.com/spearNeil/tree-research.git
