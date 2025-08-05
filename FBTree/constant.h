@@ -180,6 +180,7 @@ inline void Constant<double>::node_parameter() {
  * compatibility, oh damn, hope everything works well. */
 template<typename K>
 inline K encode_convert(K key) {
+  // convert and byte_swap have restricted K cannot be double/float or other types
   key = Constant<K>::convert(key); // encoding converting
   key = byte_swap(key); // endian swap
 
