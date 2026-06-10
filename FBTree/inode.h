@@ -1145,21 +1145,18 @@ class alignas(Config::kAlignSize) InnerNode<String> {
         if(key.len < plen) continue; // current node has modified by other threads
 
         uint64_t mask, eqmask = bitmap();
-        int cmps = std::min(kFeatureSize, key.len - plen); // feature compare bound
-
         // ok, thanks to gcc/g++, dynamic hardware scheduling, speculation and super-scalar,
         // we do not have to do loop unrolling manually
-        for(rid = 0; rid < cmps; rid++) { // equal comparison
-          mask = compare_equal(features_[rid], key.str[plen + rid] + 128);
-          mask = mask & eqmask;
+        for(rid = 0; rid < kFeatureSize; rid++) { // equal comparison
+          char byte = (plen + rid) < key.len ? key.str[plen + rid] : 0;
+          mask = compare_equal(features_[rid], byte + 128) & eqmask;
           if(mask == 0) break;
           eqmask = mask;
         }
 
-        if(rid < cmps) { // less comparison
-          mask = compare_less(features_[rid], key.str[plen + rid] + 128);
-          mask = mask & eqmask;
-
+        if(rid < kFeatureSize) { // less comparison
+          char byte = (plen + rid) < key.len ? key.str[plen + rid] : 0;
+          mask = compare_less(features_[rid], byte + 128) & eqmask;
           // less than features corresponding to eqmask
           if(mask == 0) {
             if(eqmask == 0) { idx = 0; }// the right most node, all separators
@@ -1171,7 +1168,7 @@ class alignas(Config::kAlignSize) InnerNode<String> {
           assert(eqmask != 0);
           int hid = kBitCnt - countl_zero(eqmask);
           int lid = index_least1(eqmask);
-          idx = suffix_bs(key, plen + cmps, lid, hid);
+          idx = suffix_bs(key, plen, lid, hid);
         }
 
         if(branch_unlikely(idx == knum_)) {
@@ -1204,22 +1201,20 @@ class alignas(Config::kAlignSize) InnerNode<String> {
     int pcmp = index_phase1(key, next, index, to_sibling);
 
     if(!pcmp) { // prefix of key is equal to node prefix
-      int rid, cmps, plen = plen_;
+      int rid, plen = plen_;
       uint64_t mask, eqmask = bitmap();
-      cmps = std::min(kFeatureSize, key.len - plen_);
       DEBUG_COND_ERROR(key.len - plen_ < 0, "unknown error!");
 
-      for(rid = 0; rid < cmps; rid++) {
-        mask = compare_equal(features_[rid], key.str[plen + rid] + 128);
-        mask = mask & eqmask;
+      for(rid = 0; rid < kFeatureSize; rid++) {
+        char byte = (plen + rid) < key.len ? key.str[plen + rid] : 0;
+        mask = compare_equal(features_[rid], byte + 128) & eqmask;
         if(mask == 0) break;
         eqmask = mask;
       }
 
-      if(rid < cmps) { // less comparison
-        mask = compare_less(features_[rid], key.str[plen + rid] + 128);
-        mask = mask & eqmask;
-
+      if(rid < kFeatureSize) { // less comparison
+        char byte = (plen + rid) < key.len ? key.str[plen + rid] : 0;
+        mask = compare_less(features_[rid], byte + 128) & eqmask;
         // less than features corresponding to eqmask
         if(mask == 0) {
           if(eqmask == 0) { index = 0; }//new node,or the right most node, all separators
@@ -1231,7 +1226,7 @@ class alignas(Config::kAlignSize) InnerNode<String> {
         assert(eqmask != 0);
         int hid = kBitCnt - countl_zero(eqmask);
         int lid = index_least1(eqmask);
-        index = suffix_bs(key, plen + cmps, lid, hid);
+        index = suffix_bs(key, plen, lid, hid);
       }
 
       if(index == knum_ && control_.has_sibling()) {
